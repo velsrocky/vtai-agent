@@ -1,0 +1,20 @@
+[project]
+name = "vtai-agent"
+version = "0.1.0"
+description = "VT-AIAgent — system-automation agent exposed as an MCP server for opencode/claude/pi"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "mcp>=2.2.0",
+    "pydantic>=2.13.5",
+    "pydantic-ai>=2.45.0",
+    "pydantic-settings>=2.15.0",
+    "sqlmodel>=0.0.42",
+]
+
+[project.scripts]
+vtai = "vtai_agent.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"

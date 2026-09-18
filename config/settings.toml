@@ -1,0 +1,55 @@
+# VT-AIAgent configuration
+# Top-level tables map to Settings fields. Env overrides use VT_ prefix + __
+# for nesting, e.g. VT_LOCAL__BASE_URL. API keys are read from the standard
+# env vars the coding-agent CLIs use (ANTHROPIC_API_KEY / OPENAI_API_KEY).
+
+active_provider = "local"   # anthropic | openai | local
+
+[anthropic]
+model = "claude-sonnet-4-5"
+
+[openai]
+model = "gpt-5"
+
+[local]
+# Any OpenAI-compatible endpoint: llama.cpp server, Ollama, vLLM, LM Studio.
+# Ollama is running at :11434 on this box. The vision model (minicpm-v) is
+# reserved for the perception tier; the planner uses a capable text model.
+base_url = "http://localhost:11434/v1"
+model    = "qwen2.5-coder:7b"
+api_key  = "ollama"
+
+[guardrails]
+dry_run_default  = true
+max_steps        = 40
+max_retries      = 3
+budget_usd_per_run = 1.0
+# Commands the agent is allowed to run. argv[0] must match.
+shell_allowlist = [
+  "ls", "cat", "head", "tail", "wc", "du", "df", "free", "find", "grep",
+  "file", "stat", "mkdir", "mv", "cp", "rsync", "tar", "zip", "unzip",
+  "ffmpeg", "magick", "convert", "git", "systemctl", "journalctl",
+  "rocm-smi", "vulkaninfo", "nproc", "uptime",
+]
+# Paths the agent may never touch, even inside writable_roots
+deny_globs = [
+  "~/.ssh/**", "~/.gnupg/**", "~/.aws/**", "~/.config/opencode/**",
+  "~/.claude/**", "~/.opencode/**", "**/.env", "**/.aws",
+]
+
+[paths]
+# Roots the agent may write to. Anything outside is rejected.
+writable_roots = [
+  "~/Downloads", "~/Documents/vt-data", "/tmp/vtaiagent",
+]
+data_dir = "~/.vtaiagent"   # sqlite db, audit log, screenshots
+
+[media]
+# VAAPI render node for GPU transcoding (card1 = RX 6700 XT dGPU).
+# Falls back to software encoding if the device is missing or fails.
+vaapi_device = "/dev/dri/renderD128"
+video_codec  = "h264_vaapi"   # h264_vaapi | hevc_vaapi | av1_vaapi | libx264 ...
+container    = "mkv"
+# Directories named exactly this are treated as transcode output and are
+# skipped as sources, so the agent never re-encodes its own output.
+output_dir_name = "transcoded"
