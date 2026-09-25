@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.2] - 2026-09-26
+
+### Added
+- **Echo-loop circuit breaker**: after `guardrails.max_repeat_denials` (default
+  3) denials of the identical action within `denial_window_seconds` (default
+  300), the refusal message itself escalates with a `CIRCUIT BREAKER` note —
+  visible to the looping model in both MCP and goal modes, and audited.
+  In-process by design: it targets long-running sessions (opencode/`vtai goal`),
+  the echo-loop scenario.
+
 ## [0.3.1] - 2026-09-26
 
 ### Fixed

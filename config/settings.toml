@@ -30,6 +30,10 @@ dry_run_default  = true
 max_steps        = 40
 max_retries      = 3
 budget_usd_per_run = 1.0
+# Echo-loop breaker: after N denials of the identical action within the
+# window, denial messages escalate with a CIRCUIT BREAKER stop-retrying note.
+max_repeat_denials    = 3
+denial_window_seconds = 300
 # Commands the agent is allowed to run via run_shell. argv[0] must be a bare
 # name in this list AND have a sandbox policy in guardrails.py (fail-closed).
 # find/git/systemctl/journalctl/ffmpeg/magick/convert were removed: each can

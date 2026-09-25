@@ -42,6 +42,11 @@ class Guardrails(BaseModel):
     deny_globs: list[str] = Field(default_factory=list)
     # run_shell only executes binaries resolving under one of these dirs.
     trusted_bin_dirs: list[str] = ["/usr/bin", "/bin", "/usr/local/bin"]
+    # Echo-loop breaker: after this many denials of the *same* action+detail
+    # within denial_window_seconds, subsequent denial messages carry a
+    # CIRCUIT BREAKER note telling the model to stop retrying.
+    max_repeat_denials: int = Field(default=3, ge=1)
+    denial_window_seconds: float = Field(default=300, ge=1)
     # Extend the built-in fail-closed shell policy: map an allowlisted binary
     # to how its path arguments should be treated.
     shell_extra_modes: dict[str, Literal["none", "read", "write"]] = Field(

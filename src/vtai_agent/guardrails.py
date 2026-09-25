@@ -15,6 +15,8 @@ import fnmatch
 import os
 import shlex
 import shutil
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,6 +61,13 @@ class GuardrailViolation(PermissionError):
     """Raised when an action is outside the allowlist."""
 
 
+# Echo-loop breaker state: (action, detail) -> [count, last_ts]. Process-wide,
+# so denials accumulate across Guardrails instances within the configured
+# window — that's the point: a looping model gets the same escalating answer.
+_denial_counts: dict[tuple[str, str], list] = {}
+_denial_lock = threading.Lock()
+
+
 @dataclass
 class ShellDecision:
     argv: list[str]
@@ -81,8 +90,9 @@ class Guardrails:
         self._check_deny(p)
         roots = [Path(r).expanduser().resolve() for r in self.settings.paths.writable_roots]
         if not any(self._is_within(p, r) for r in roots):
-            self._deny_action("write", str(p), f"outside writable_roots: {roots}")
-            raise GuardrailViolation(f"Not writable (outside allowlist): {p}")
+            note = self._deny_action("write", str(p), f"outside writable_roots: {roots}")
+            raise GuardrailViolation(
+                f"Not writable (outside allowlist): {p}" + (f" — {note}" if note else ""))
         return p
 
     def check_readable(self, path: str | Path) -> Path:
@@ -94,8 +104,9 @@ class Guardrails:
         s = str(p)
         for pat in self._deny:
             if fnmatch.fnmatch(s, pat) or self._within_literal_prefix(s, pat):
-                self._deny_action("access", s, f"matches deny glob {pat}")
-                raise GuardrailViolation(f"Protected path: {p}")
+                note = self._deny_action("access", s, f"matches deny glob {pat}")
+                raise GuardrailViolation(
+                    f"Protected path: {p}" + (f" — {note}" if note else ""))
 
     def is_denied(self, path: str | Path) -> bool:
         """Non-raising check used to filter scan results out of reports."""
@@ -190,9 +201,10 @@ class Guardrails:
         return p
 
     def _reject_shell(self, argv: list[str], command: str, reason: str) -> ShellDecision:
-        d = ShellDecision(argv, command, False, reason)
-        self._deny_action("shell", command, reason)
-        return d
+        note = self._deny_action("shell", command, reason)
+        if note:
+            reason = f"{reason} — {note}"
+        return ShellDecision(argv, command, False, reason)
 
     def _mode_for(self, binary: str) -> str | None:
         extra = self.cfg.shell_extra_modes.get(binary)
@@ -227,5 +239,35 @@ class Guardrails:
             raise GuardrailViolation("Kill switch active — refusing to act")
 
     # ---------- audit ----------
-    def _deny_action(self, action: str, detail: str, reason: str) -> None:
+    def _note_denial(self, action: str, detail: str) -> bool:
+        """Count this denial; True once the repeat threshold is reached."""
+        now = time.monotonic()
+        limit = self.cfg.max_repeat_denials
+        window = self.cfg.denial_window_seconds
+        with _denial_lock:
+            rec = _denial_counts.get((action, detail))
+            if rec is None or (now - rec[1]) > window:
+                rec = [0, now]
+            rec[0] += 1
+            rec[1] = now
+            _denial_counts[(action, detail)] = rec
+            return rec[0] >= limit
+
+    @classmethod
+    def reset_denial_counts(cls) -> None:
+        with _denial_lock:
+            _denial_counts.clear()
+
+    def _deny_action(self, action: str, detail: str, reason: str) -> str:
+        """Audit a denial; returns the CIRCUIT BREAKER note when the repeat
+        threshold trips (empty string otherwise) so callers can escalate the
+        refusal message the model actually sees."""
+        note = ""
+        if self._note_denial(action, detail):
+            note = (f"CIRCUIT BREAKER: '{detail}' denied "
+                    f"{self.cfg.max_repeat_denials}x within "
+                    f"{int(self.cfg.denial_window_seconds)}s — stop retrying "
+                    "the same call; adapt or finish.")
+            reason = f"{reason} :: {note}"
         db.audit(_CURRENT_RUN.get(), action, f"{detail} :: {reason}", allowed=False)
+        return note

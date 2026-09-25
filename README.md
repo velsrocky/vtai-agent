@@ -24,6 +24,8 @@ opencode / Claude Code / pi — and drivable directly via the `vtai` CLI.
   with an explicit read/write policy, resolve inside `trusted_bin_dirs`, carry
   no exec-enabling flags, and every path argument passes the same checks.
 - **Kill switch**: drop a `KILL` file in `data_dir` to abort executing tools.
+- **Echo-loop breaker**: N identical denials in a window escalate the refusal
+  into a `CIRCUIT BREAKER` instruction the looping model can't miss.
 - **Budget cap**: `budget_usd_per_run` aborts an orchestrated run when accrued
   token cost exceeds it; spend is recorded per run.
 - **Audit**: every allow and deny is logged to SQLite in `data_dir`, each

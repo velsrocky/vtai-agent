@@ -7,6 +7,7 @@ from vtai_agent.guardrails import Guardrails, GuardrailViolation
 
 @pytest.fixture
 def g(sandbox):
+    Guardrails.reset_denial_counts()
     return Guardrails(sandbox.cfg, sandbox.settings)
 
 
@@ -137,6 +138,27 @@ def test_shell_modeless_binary_denied(g):
     d = g.check_shell("python3 something.py")
     assert not d.allowed
     assert "not in allowlist" in d.reason
+
+
+# ---------- echo-loop circuit breaker ----------
+def test_circuit_breaker_trips_on_repeated_denials(g):
+    for _ in range(2):
+        d = g.check_shell("rm -rf /loop")
+        assert not d.allowed and "CIRCUIT BREAKER" not in d.reason
+    d = g.check_shell("rm -rf /loop")
+    assert "CIRCUIT BREAKER" in d.reason
+    # a different denial is unaffected by this one's counter
+    d2 = g.check_shell("rm -rf /elsewhere")
+    assert "CIRCUIT BREAKER" not in d2.reason
+
+
+def test_circuit_breaker_resets_after_window(g):
+    for _ in range(3):
+        g.check_shell("rm -rf /win")
+    assert "CIRCUIT BREAKER" in g.check_shell("rm -rf /win").reason
+    from vtai_agent import guardrails as GR
+    GR._denial_counts[("shell", "rm -rf /win")][1] -= g.cfg.denial_window_seconds + 1
+    assert "CIRCUIT BREAKER" not in g.check_shell("rm -rf /win").reason
 
 
 # ---------- kill / dry-run ----------
