@@ -219,7 +219,11 @@ or TLS reverse proxy, never bare exposure.
   running without a rollback point. Rollback uses `git reset --hard` and audits
   failures.
 - The kill switch is enforced by every executing tool, not just the orchestrator.
-- 30 tests cover the bypass attempts that used to work; CI (uv sync --dev,
+- Budget caps are real now: per-step cost from `RunUsage` (native cost table or
+  `cost_per_1k_*` config) aborts the run at `budget_usd_per_run` and the spend
+  is persisted on the run. Direct MCP/CLI calls get attributed Run rows and
+  guardrail denials attach to them through a contextvar.
+- 32 tests cover the bypass attempts that used to work; CI (uv sync --dev,
   pytest, ruff) actually runs.
 
 **Deleted:** `api.py`, `scheduler.py`, `tray.py`, `verify.py`, `frontend/`,

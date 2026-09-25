@@ -11,15 +11,22 @@ from pydantic_settings import (
 CONFIG_TOML = Path(__file__).resolve().parents[2] / "config" / "settings.toml"
 
 
-class ProviderAnthropic(BaseModel):
+class _Priced(BaseModel):
+    """USD per 1,000 tokens. None = fall back to pydantic-ai's native cost
+    table, then 0.0 (free)."""
+    cost_per_1k_input: float | None = Field(default=None, ge=0)
+    cost_per_1k_output: float | None = Field(default=None, ge=0)
+
+
+class ProviderAnthropic(_Priced):
     model: str = "claude-sonnet-4-5"
 
 
-class ProviderOpenAI(BaseModel):
+class ProviderOpenAI(_Priced):
     model: str = "gpt-5"
 
 
-class ProviderLocal(BaseModel):
+class ProviderLocal(_Priced):
     """Any OpenAI-compatible endpoint: llama.cpp server, Ollama, vLLM, LM Studio."""
     base_url: str = "http://localhost:8080/v1"
     model: str = "qwen2.5-vl-7b-instruct"

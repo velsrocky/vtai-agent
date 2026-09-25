@@ -89,7 +89,7 @@ mount exactly the roots you allow.
 ## Verify
 
 ```bash
-uv run pytest tests/ -v          # 30 tests incl. sandbox bypass attempts
+uv run pytest tests/ -v          # 38 tests incl. sandbox bypass attempts
 uv run ruff check src/ tests/
 uv run vtai info
 uv run vtai run run_shell --params '{"command":"cat ~/.ssh/id_rsa"}'

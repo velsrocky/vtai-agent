@@ -82,6 +82,19 @@ def build_model(settings: Settings | None = None) -> Model:
     )
 
 
+def estimate_step_cost(settings: Settings, usage: object) -> float:
+    """USD for one agent step. Explicit `cost_per_1k_*` config wins; else
+    pydantic-ai's native cost table when the model has one; else 0 (free/local)."""
+    provider = getattr(settings, settings.active_provider)
+    p_in = getattr(provider, "cost_per_1k_input", None)
+    p_out = getattr(provider, "cost_per_1k_output", None)
+    if p_in is not None or p_out is not None:
+        return ((getattr(usage, "input_tokens", 0) or 0) / 1000 * (p_in or 0.0)
+                + (getattr(usage, "output_tokens", 0) or 0) / 1000 * (p_out or 0.0))
+    cost = getattr(usage, "cost", None)
+    return float(cost) if cost is not None else 0.0
+
+
 def describe_active(settings: Settings | None = None) -> dict:
     """Human/CLI-readable summary of the configured brain."""
     settings = settings or get_settings()

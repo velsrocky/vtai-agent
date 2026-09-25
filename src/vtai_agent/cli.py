@@ -36,7 +36,8 @@ def cmd_run(args) -> int:
         print(f"invalid --params JSON: {e}", file=sys.stderr)
         return 2
     try:
-        result = asyncio.run(registry.call(args.tool, params))
+        from .mcp_server import tracked_call
+        result = asyncio.run(tracked_call(args.tool, params, source="cli"))
     except Exception as e:
         print(f"[ERROR] {type(e).__name__}: {e}", file=sys.stderr)
         return 1
@@ -57,7 +58,8 @@ def cmd_goal(args) -> int:
     dry = None if args.dry_run is None else args.dry_run
     result = asyncio.run(orch.run_goal(args.goal, dry_run=dry))
     print(f"\n[run #{result.run_id}] status={result.status} steps={result.steps} "
-          f"dry_run={result.dry_run} provider={result.provider}")
+          f"dry_run={result.dry_run} provider={result.provider} "
+          f"cost=${result.cost_usd:.4f}")
     if result.errors:
         print("errors:")
         for e in result.errors:

@@ -6,7 +6,7 @@ The model reasons in plain text and emits tool calls as fenced JSON; we parse,
 guard, execute via the shared tool registry, and feed results back — until it
 produces a final answer or hits a bound.
 
-Bounds enforced every step: max_steps, kill switch, and (later) budget caps.
+Bounds enforced every step: max_steps, kill switch, and budget caps.
 Every step is persisted, so any run is replayable and auditable.
 """
 
@@ -18,8 +18,13 @@ from pydantic_ai import Agent
 
 from . import db
 from .config import Settings, get_settings
-from .guardrails import GuardrailViolation, Guardrails
-from .providers import build_model, describe_active
+from .guardrails import (
+    GuardrailViolation,
+    Guardrails,
+    reset_current_run,
+    set_current_run,
+)
+from .providers import build_model, describe_active, estimate_step_cost
 from .tools import ToolError, registry
 
 
@@ -67,6 +72,7 @@ class RunResult:
     dry_run: bool
     provider: str
     errors: list[str] = field(default_factory=list)
+    cost_usd: float = 0.0
 
 
 def build_tool_manifest() -> str:
@@ -105,10 +111,11 @@ def parse_tool_call(text: str) -> ParsedToolCall | None:
 
 
 class Orchestrator:
-    def __init__(self, settings: Settings | None = None, guardrails: Guardrails | None = None):
+    def __init__(self, settings: Settings | None = None,
+                 guardrails: Guardrails | None = None, model=None):
         self.settings = settings or get_settings()
         self.g = guardrails or Guardrails(self.settings.guardrails, self.settings)
-        self.model = build_model(self.settings)
+        self.model = model if model is not None else build_model(self.settings)
 
     async def run_goal(self, goal: str, dry_run: bool | None = None) -> RunResult:
         dry_run = dry_run if dry_run is not None else self.g.dry_run_default
@@ -136,6 +143,9 @@ class Orchestrator:
         steps = 0
         status = "failed"
         final_answer = ""
+        budget = self.settings.guardrails.budget_usd_per_run
+        spent = 0.0
+        run_token = set_current_run(run_id)
 
         try:
             for step in range(self.settings.guardrails.max_steps):
@@ -149,6 +159,16 @@ class Orchestrator:
                 history = result.all_messages()
                 text = result.output.strip()
                 steps = step + 1
+
+                # The model was charged for this step; if that alone blows the
+                # budget, stop before executing anything.
+                spent += estimate_step_cost(self.settings, result.usage)
+                if spent > budget:
+                    status = "budget_exceeded"
+                    final_answer = (f"Run budget (${budget:.2f}) exceeded at step "
+                                    f"{steps} (spent ${spent:.4f}).")
+                    db.audit(run_id, "abort", final_answer, allowed=True)
+                    break
 
                 call = parse_tool_call(text)
                 if call is None:
@@ -190,10 +210,11 @@ class Orchestrator:
                 )
                 errors.append("max_steps exhausted")
         finally:
-            db.finish_run(run_id, status)
+            reset_current_run(run_token)
+            db.finish_run(run_id, status, cost_usd=spent)
 
         return RunResult(
             run_id=run_id, status=status, steps=steps,
             final_answer=final_answer, dry_run=dry_run,
-            provider=provider, errors=errors,
+            provider=provider, errors=errors, cost_usd=spent,
         )

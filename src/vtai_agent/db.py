@@ -51,7 +51,8 @@ def start_run(goal: str, dry_run: bool, provider: str) -> int:
         return run.id  # captured before the session closes (avoids DetachedInstanceError)
 
 
-def finish_run(run_id: int, status: str, cost_usd: float = 0.0) -> None:
+def finish_run(run_id: int, status: str, cost_usd: float = 0.0,
+               dry_run: bool | None = None) -> None:
     from datetime import datetime, timezone
 
     with session_scope() as s:
@@ -60,6 +61,8 @@ def finish_run(run_id: int, status: str, cost_usd: float = 0.0) -> None:
             run.status = status
             run.finished_at = datetime.now(timezone.utc)
             run.cost_usd = cost_usd
+            if dry_run is not None:
+                run.dry_run = dry_run
             s.add(run)
 
 

@@ -7,8 +7,9 @@ a native tool of that agent. Errors from guardrails are returned as tool results
 
 from mcp.server.mcpserver import MCPServer
 
-from . import __version__
-from .guardrails import GuardrailViolation
+from . import __version__, db
+from .config import get_settings
+from .guardrails import GuardrailViolation, reset_current_run, set_current_run
 from .tools import (
     BackupSyncTool,
     DelegateCodingTool,
@@ -18,11 +19,14 @@ from .tools import (
     ShellTool,
     SystemInfoTool,
     ToolError,
+    ToolResult,
     registry,
 )
 
 
 def register_tools() -> None:
+    if registry.all():  # idempotent: safe to call from CLI, MCP, and tests
+        return
     registry.register(SystemInfoTool())
     registry.register(ShellTool())
     registry.register(OrganizeFilesTool())
@@ -193,9 +197,44 @@ def build_server() -> MCPServer:
     return server
 
 
+async def tracked_call(name: str, args: dict, *, source: str = "mcp") -> ToolResult:
+    """Run a tool call inside an attributed Run row so every direct MCP/CLI
+    invocation gets history and non-NULL audit linkage, same as orchestrated
+    runs. DB bookkeeping failures never block the tool itself."""
+    run_id: int | None = None
+    try:
+        run_id = db.start_run(goal=f"tool:{name}",
+                              dry_run=get_settings().guardrails.dry_run_default,
+                              provider=source)
+    except Exception:
+        run_id = None
+    token = set_current_run(run_id)
+    try:
+        result = await registry.call(name, args, run_id=run_id)
+    except GuardrailViolation:
+        _finish(run_id, "denied")
+        raise
+    except Exception:
+        _finish(run_id, "failed")
+        raise
+    finally:
+        reset_current_run(token)
+    _finish(run_id, "ok" if result.ok else "failed", dry_run=result.dry_run)
+    return result
+
+
+def _finish(run_id: int | None, status: str, dry_run: bool | None = None) -> None:
+    if run_id is None:
+        return
+    try:
+        db.finish_run(run_id, status, dry_run=dry_run)
+    except Exception:
+        pass
+
+
 async def _call(name: str, args: dict) -> str:
     try:
-        result = await registry.call(name, args)
+        result = await tracked_call(name, args)
         return result.model_dump_json()
     except GuardrailViolation as e:
         return f"[GUARDRAIL DENIED] {e}"

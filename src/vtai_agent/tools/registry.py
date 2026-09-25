@@ -53,6 +53,9 @@ class ToolRegistry:
     def all(self) -> dict[str, Tool]:
         return dict(self._tools)
 
+    def clear(self) -> None:
+        self._tools.clear()
+
     async def call(self, name: str, args: dict[str, Any], *, run_id: int | None = None) -> ToolResult:
         tool = self.get(name)
         inp = tool.InputModel(**args)

@@ -10,6 +10,7 @@ sandbox mode (none | read | write), carries no dangerous flags, and every
 path argument passes the same deny/writable checks the file tools use.
 """
 
+import contextvars
 import fnmatch
 import os
 import shlex
@@ -20,6 +21,21 @@ from pathlib import Path
 from .config import Guardrails as GuardrailsConfig
 from .config import Settings, get_settings
 from . import db
+
+# Run attribution for guardrail decisions raised outside a tool's explicit
+# audit calls (denials from check_shell/check_writable). Set by the
+# orchestrator and direct-call wrapper; read by _deny_action.
+_CURRENT_RUN: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "vtai_current_run", default=None,
+)
+
+
+def set_current_run(run_id: int | None) -> contextvars.Token:
+    return _CURRENT_RUN.set(run_id)
+
+
+def reset_current_run(token: contextvars.Token) -> None:
+    _CURRENT_RUN.reset(token)
 
 TRUSTED_BIN_DIRS: tuple[str, ...] = ("/usr/bin", "/bin", "/usr/local/bin")
 
@@ -212,4 +228,4 @@ class Guardrails:
 
     # ---------- audit ----------
     def _deny_action(self, action: str, detail: str, reason: str) -> None:
-        db.audit(None, action, f"{detail} :: {reason}", allowed=False)
+        db.audit(_CURRENT_RUN.get(), action, f"{detail} :: {reason}", allowed=False)

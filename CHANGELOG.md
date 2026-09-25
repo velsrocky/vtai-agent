@@ -22,9 +22,18 @@
   path arguments are resolved against the command's working dir, so delegate
   verification commands are actually checkable.
 - **Tests**: `Guardrails(cfg, settings)` injects settings instead of reading
-  globals; test suite rewritten (30 tests: sandbox bypass attempts, tool
+  globals; test suite rewritten (38 tests: sandbox bypass attempts, tool
   dry-run/execute behavior, env scrubbing). CI runs `uv sync --dev` with dev
   deps declared; ruff clean across src/ and tests/.
+- **Budget enforcement**: `guardrails.budget_usd_per_run` is now actually
+  enforced in the orchestrator — per-step token cost (explicit
+  `cost_per_1k_input/output` config, else pydantic-ai's native cost table,
+  else free) accumulates and aborts with status `budget_exceeded`; totals are
+  persisted on the run row.
+- **Audit attribution**: direct MCP and CLI tool invocations now create their
+  own Run rows (`tool:<name>`, provider `mcp`/`cli`) with final status
+  ok/failed/denied, and guardrail denials attach to that run via a context
+  var instead of landing as `run_id NULL`.
 
 ### Removed
 - Dead/broken modules deleted: `api.py`, `scheduler.py`, `tray.py`, `verify.py`,
