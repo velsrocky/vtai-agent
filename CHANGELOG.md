@@ -34,6 +34,8 @@
   own Run rows (`tool:<name>`, provider `mcp`/`cli`) with final status
   ok/failed/denied, and guardrail denials attach to that run via a context
   var instead of landing as `run_id NULL`.
+- **Orphan sweep**: startup marks runs left in `running` by dead processes as
+  `failed` (audited, idempotent) so history reflects reality.
 
 ### Removed
 - Dead/broken modules deleted: `api.py`, `scheduler.py`, `tray.py`, `verify.py`,

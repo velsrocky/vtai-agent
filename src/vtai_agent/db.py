@@ -10,6 +10,25 @@ from .models import AuditLog, Run, Step
 _engine = None
 
 
+def sweep_orphaned_runs() -> int:
+    """Runs still marked 'running' belong to dead processes — close them out
+    so history reflects reality and nothing replays a zombie run."""
+    from datetime import datetime, timezone
+
+    swept = 0
+    with session_scope() as s:
+        orphans = list(s.exec(select(Run).where(Run.status == "running")).all())
+        for run in orphans:
+            run.status = "failed"
+            run.finished_at = datetime.now(timezone.utc)
+            s.add(run)
+            s.add(AuditLog(run_id=run.id, action="abort",
+                           detail="startup sweep: orphaned run marked failed",
+                           allowed=True))
+            swept += 1
+    return swept
+
+
 def db_path() -> Path:
     return get_settings().data_dir / "vtai.db"
 

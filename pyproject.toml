@@ -1,6 +1,6 @@
 [project]
 name = "vtai-agent"
-version = "0.1.0"
+version = "0.3.1"
 description = "VT-AIAgent — system-automation agent exposed as an MCP server for opencode/claude/pi"
 readme = "README.md"
 requires-python = ">=3.14"

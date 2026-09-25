@@ -245,6 +245,10 @@ async def _call(name: str, args: dict) -> str:
 
 
 def main() -> None:
+    try:
+        db.sweep_orphaned_runs()
+    except Exception:  # a broken audit DB must not block the server
+        pass
     build_server().run(transport="stdio")
 
 

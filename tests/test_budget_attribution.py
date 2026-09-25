@@ -119,3 +119,21 @@ def test_failed_tool_records_failed_status(sandbox, tools):
     }))
     assert out.startswith("[ERROR]")
     assert _latest_run()["status"] == "failed"
+
+
+# ---------- orphaned-run sweep ----------
+def test_sweep_marks_orphans_and_leaves_closed_runs(sandbox):
+    orphan = db.start_run(goal="ghost", dry_run=True, provider="cli")
+    done = db.start_run(goal="closed", dry_run=False, provider="cli")
+    db.finish_run(done, "ok")
+
+    assert db.sweep_orphaned_runs() == 1
+    assert db.sweep_orphaned_runs() == 0  # idempotent
+
+    with db.session_scope() as s:
+        o, d = s.get(Run, orphan), s.get(Run, done)
+        assert o.status == "failed" and o.finished_at is not None
+        assert d.status == "ok"
+        audits = [a.model_dump() for a in
+                  s.exec(select(AuditLog).where(AuditLog.run_id == orphan)).all()]
+    assert any(a["action"] == "abort" for a in audits)

@@ -3,7 +3,7 @@ import asyncio
 import json
 import sys
 
-from . import __version__
+from . import __version__, db
 from .config import get_settings
 from .providers import describe_active
 from .tools import registry
@@ -94,6 +94,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.command in ("goal", "info"):
+        try:
+            swept = db.sweep_orphaned_runs()
+            if swept:
+                print(f"[sweep] marked {swept} orphaned run(s) failed")
+        except Exception as e:
+            print(f"[sweep] skipped: {e}", file=sys.stderr)
     raise SystemExit(args.func(args))
 
 
