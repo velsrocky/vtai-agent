@@ -178,7 +178,7 @@ def build_server() -> MCPServer:
             prompt: The coding task to perform.
             working_dir: Project directory (must be a git repo, in writable_roots).
             dry_run: Snapshot and plan only (defaults to config dry_run_default).
-            verify_command: Command that must pass afterward, e.g. "python -m pytest".
+            verify_command: Allowlisted command that must pass afterward, e.g. "pytest".
             auto_rollback: Restore the snapshot if verification fails.
             timeout: Seconds before the delegate is killed.
             skip_permissions: Allow --dangerously-skip-permissions (unattended runs).

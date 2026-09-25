@@ -11,7 +11,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from ..guardrails import Guardrails
+from ..guardrails import GuardrailViolation, Guardrails
 from .registry import Tool, ToolResult
 
 CACHE_DIRS = [
@@ -70,8 +70,11 @@ class DiskAuditTool(Tool[DiskAuditInput]):
 
         def walk():
             for dirpath, dirnames, filenames in _walk_guarded(root):
+                dirnames[:] = [d for d in dirnames if not self.g.is_denied(d)]
                 for name in filenames:
                     p = Path(dirpath) / name
+                    if self.g.is_denied(p):
+                        continue
                     try:
                         st = p.stat()
                     except OSError:
@@ -104,6 +107,10 @@ class DiskAuditTool(Tool[DiskAuditInput]):
 
         for c in CACHE_DIRS:
             d = Path(c).expanduser()
+            try:
+                d = self.g.check_readable(d)
+            except GuardrailViolation:
+                continue  # deny-listed dirs are not even measured
             if not d.is_dir():
                 continue
             size = await asyncio.to_thread(measure, d)

@@ -1,15 +1,33 @@
 import asyncio
-import json
+import os
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from .. import db
-from ..guardrails import GuardrailViolation, Guardrails, get_settings
+from ..guardrails import GuardrailViolation, Guardrails
 from .registry import Tool, ToolResult
 
 
+def _child_env() -> dict[str, str]:
+    """Minimal environment: children never inherit API keys or tokens."""
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+           "HOME": str(Path.home()),
+           "LANG": os.environ.get("LANG", "C.UTF-8")}
+    keep = ("LC_ALL", "TZ", "DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+    for k in keep:
+        if k in os.environ:
+            env[k] = os.environ[k]
+    return env
+
+
 class ShellInput(BaseModel):
-    command: str = Field(description="Shell command. The binary (argv[0]) must be in the allowlist.")
+    command: str = Field(
+        description=(
+            "Shell command. The binary must be a bare allowlisted name with a "
+            "sandbox policy; every path argument is deny/writable-checked."
+        ),
+    )
     dry_run: bool | None = Field(
         default=None,
         description="Preview without executing. Defaults to config guardrails.dry_run_default.",
@@ -20,8 +38,9 @@ class ShellInput(BaseModel):
 class ShellTool(Tool[ShellInput]):
     name = "run_shell"
     description = (
-        "Run an allowlisted shell command. Denied binaries and protected paths "
-        "raise instead of executing. Set dry_run=true to preview the plan only."
+        "Run an allowlisted shell command. Denied binaries, protected or "
+        "out-of-sandbox path arguments, and dangerous flags raise instead of "
+        "executing. Set dry_run=true to preview the plan only."
     )
     InputModel = ShellInput
 
@@ -43,6 +62,7 @@ class ShellTool(Tool[ShellInput]):
                 dry_run=True,
             )
 
+        self.g.ensure_not_killed()
         db.audit(run_id, "shell", inp.command, allowed=True)
         proc = None
         try:
@@ -50,6 +70,7 @@ class ShellTool(Tool[ShellInput]):
                 *decision.argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_child_env(),
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=inp.timeout)
         except asyncio.TimeoutError:

@@ -107,7 +107,7 @@ def parse_tool_call(text: str) -> ParsedToolCall | None:
 class Orchestrator:
     def __init__(self, settings: Settings | None = None, guardrails: Guardrails | None = None):
         self.settings = settings or get_settings()
-        self.g = guardrails or Guardrails(self.settings.guardrails)
+        self.g = guardrails or Guardrails(self.settings.guardrails, self.settings)
         self.model = build_model(self.settings)
 
     async def run_goal(self, goal: str, dry_run: bool | None = None) -> RunResult:

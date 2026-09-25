@@ -7,14 +7,13 @@ rsync-based incremental backup with verification. Safety posture:
 """
 
 import asyncio
-import json
 import re
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from .. import db
-from ..guardrails import GuardrailViolation, Guardrails
+from ..guardrails import Guardrails
 from .registry import Tool, ToolResult
 
 _SUMMARY_RE = re.compile(
@@ -61,7 +60,8 @@ class BackupSyncTool(Tool[BackupSyncInput]):
         dst = self.g.check_writable(inp.destination)
         if not src.is_dir():
             raise NotADirectoryError(f"source is not a directory: {src}")
-        dst.mkdir(parents=True, exist_ok=True)
+        if not dry_run:
+            dst.mkdir(parents=True, exist_ok=True)
 
         argv = ["rsync", "-a", "--itemize-changes", "--stats"]
         if dry_run:
@@ -73,6 +73,8 @@ class BackupSyncTool(Tool[BackupSyncInput]):
             argv.append("--delete")
         argv += [f"{src}/", f"{dst}/"]
 
+        if not dry_run:
+            self.g.ensure_not_killed()
         db.audit(run_id, "rsync", f"{'[dry-run] ' if dry_run else ''}{' '.join(argv)}",
                  allowed=True)
         stats = await self._run(argv)

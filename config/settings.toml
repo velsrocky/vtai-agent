@@ -24,18 +24,35 @@ dry_run_default  = true
 max_steps        = 40
 max_retries      = 3
 budget_usd_per_run = 1.0
-# Commands the agent is allowed to run. argv[0] must match.
+# Commands the agent is allowed to run via run_shell. argv[0] must be a bare
+# name in this list AND have a sandbox policy in guardrails.py (fail-closed).
+# find/git/systemctl/journalctl/ffmpeg/magick/convert were removed: each can
+# execute arbitrary code or write outside the sandbox. Use the dedicated tools
+# (backup_sync, delegate_coding, transcode_media) for those workflows.
 shell_allowlist = [
-  "ls", "cat", "head", "tail", "wc", "du", "df", "free", "find", "grep",
+  "ls", "cat", "head", "tail", "wc", "du", "df", "free", "grep",
   "file", "stat", "mkdir", "mv", "cp", "rsync", "tar", "zip", "unzip",
-  "ffmpeg", "magick", "convert", "git", "systemctl", "journalctl",
-  "rocm-smi", "vulkaninfo", "nproc", "uptime",
+  "rocm-smi", "vulkaninfo", "nproc", "uptime", "pytest",
 ]
 # Paths the agent may never touch, even inside writable_roots
 deny_globs = [
   "~/.ssh/**", "~/.gnupg/**", "~/.aws/**", "~/.config/opencode/**",
   "~/.claude/**", "~/.opencode/**", "**/.env", "**/.aws",
 ]
+# run_shell executes binaries only after shutil.which resolves them under one
+# of these prefixes. This box has Rust coreutils installed by cargo, so
+# ls/cat/cp/mkdir resolve into /usr/lib/cargo/bin/coreutils — same trust class
+# as /usr/local/bin (root-installed package dir). Remove if you drop it.
+trusted_bin_dirs = [
+  "/usr/bin", "/bin", "/usr/local/bin", "/usr/lib/cargo/bin",
+]
+
+# Extend the built-in fail-closed shell policy for allowlisted binaries not
+# covered by guardrails.py. Values: "none" | "read" | "write".
+# pytest is used as delegate_coding verify_command; it runs in the repo dir,
+# which is writable-checked, so "write" is safe.
+[guardrails.shell_extra_modes]
+pytest = "write"
 
 [paths]
 # Roots the agent may write to. Anything outside is rejected.

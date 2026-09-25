@@ -149,6 +149,7 @@ class OrganizeFilesTool(Tool[OrganizeFilesInput]):
         return None
 
     async def _execute(self, plan: list["PlannedMove"], run_id: int | None) -> tuple[int, int]:
+        self.g.ensure_not_killed()
         moved = skipped = 0
         for p in plan:
             src_path = Path(p.source)

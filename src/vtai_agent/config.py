@@ -4,8 +4,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import (
     BaseSettings,
-    DotEnvSettingsSource,
-    EnvSettingsSource,
     SettingsConfigDict,
     TomlConfigSettingsSource,
 )
@@ -35,6 +33,13 @@ class Guardrails(BaseModel):
     budget_usd_per_run: float = 1.0
     shell_allowlist: list[str] = Field(default_factory=list)
     deny_globs: list[str] = Field(default_factory=list)
+    # run_shell only executes binaries resolving under one of these dirs.
+    trusted_bin_dirs: list[str] = ["/usr/bin", "/bin", "/usr/local/bin"]
+    # Extend the built-in fail-closed shell policy: map an allowlisted binary
+    # to how its path arguments should be treated.
+    shell_extra_modes: dict[str, Literal["none", "read", "write"]] = Field(
+        default_factory=dict,
+    )
 
 
 class Media(BaseModel):

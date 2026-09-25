@@ -112,8 +112,8 @@ async def gpu_info() -> dict:
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=8)
             devs = [
-                l.strip() for l in stdout.decode(errors="replace").splitlines()
-                if "deviceName" in l
+                ln.strip() for ln in stdout.decode(errors="replace").splitlines()
+                if "deviceName" in ln
             ]
             return {"backend": "vulkan", "devices": devs[:4]}
         except (asyncio.TimeoutError, OSError):

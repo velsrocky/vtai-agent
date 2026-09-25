@@ -1,0 +1,12 @@
+services:
+  vtai:
+    build: .
+    stdin_open: true   # MCP server speaks stdio
+    volumes:
+      - ~/.vtaiagent:/root/.vtaiagent
+      - ~/Downloads:/root/Downloads
+      - ~/Documents:/root/Documents
+    environment:
+      - VT_LOCAL__MODEL=qwen2.5-coder:7b
+      - VT_GUARDRAILS__DRY_RUN_DEFAULT=true
+    restart: unless-stopped

@@ -7,7 +7,6 @@ clobber originals. Falls back to software if the VAAPI device is unavailable.
 """
 
 import asyncio
-import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -78,6 +77,7 @@ class MediaTranscodeTool(Tool[TranscodeMediaInput]):
                 dry_run=True,
             )
 
+        self.g.ensure_not_killed()
         hw = self._vaapi_available()
         results = []
         ok = fail = 0
