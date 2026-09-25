@@ -86,7 +86,12 @@ def test_backup_execute_transfers(sandbox):
 
 
 # ---------- delegate ----------
-def test_delegate_requires_git_repo(sandbox):
+def test_delegate_requires_git_repo(sandbox, monkeypatch):
+    # don't depend on a coding CLI being installed (true on CI runners)
+    monkeypatch.setattr(
+        "vtai_agent.tools.delegate.shutil.which",
+        lambda name: f"/usr/bin/{name}",
+    )
     tool = DelegateCodingTool(_g(sandbox))
     plain = sandbox.writable / "plain"
     plain.mkdir()
