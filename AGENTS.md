@@ -58,3 +58,73 @@ Before acting on any user message, correct obvious spelling mistakes in it.
 
 This rule is always on and does not need to be requested.
 <!-- END vtai-agent:auto-spelling-corrector -->
+
+<!-- BEGIN vtai-agent:session-memory -->
+## Session Memory (managed by vtai-agent/session-memory)
+
+Persistent facts about this workspace and its user live in this file. Update
+it when something durable is learned; do not log per-turn trivia.
+
+Known facts:
+
+- Assistant display name: Vitae.
+- Microphone fix (2026-10-02): internal mic boost must stay at 0 and capture
+  at 75%; applied at login by ~/.local/bin/vtai-audio-fix.sh via the
+  vtai-agent-audio-fix systemd user service. Do not raise the boost, it
+  clips the input and corrupts transcription.
+- Voice mode requires agent-listen + agent-speak; noisy transcripts mean the
+  mic level is wrong, not that the user misspoke.
+
+Rules:
+
+1. Before acting on a memory-worthy question (name, preferences, conventions),
+   check this section first.
+2. After learning a new stable preference or gotcha, append it here.
+3. Keep this section short; aim for under 30 lines.
+<!-- END vtai-agent:session-memory -->
+
+<!-- BEGIN vtai-agent:safety-rails -->
+## Safety Rails (managed by vtai-agent/safety-rails)
+
+Before any destructive or system-wide change, state the blast radius in one
+or two sentences and ask the user to confirm with "yes". This applies to:
+deleting files or directories, git history rewrites, force pushes, mass
+edits, changing ALSA/PipeWire/system settings, installing or removing
+packages, and stopping running services.
+
+Low-risk reads, greps, test runs, and adding new files do not need
+confirmation.
+<!-- END vtai-agent:safety-rails -->
+
+<!-- BEGIN vtai-agent:voice-ux -->
+## Better Voice UX (managed by vtai-agent/voice-ux)
+
+1. Read-back: after transcribing in voice mode, speak the corrected phrase
+   back in one short sentence and wait for the user to say "go"/"yes" or
+   correct it before acting on anything beyond answering.
+2. If the transcript looks ambiguous or noisy, ask one clarifying spoken
+   question instead of guessing.
+3. Offer typed input as a fallback whenever speech recognition garbles.
+<!-- END vtai-agent:voice-ux -->
+
+<!-- BEGIN vtai-agent:voice-code-review -->
+## Voice-Driven Code Changes (managed by vtai-agent/voice-code-review)
+
+When the user describes a code change, especially by voice:
+
+1. Restate the intended change in one sentence and wait for acknowledgment.
+2. Draft the edit; show a concise diff summary (files and lines), not full
+   code, unless asked.
+3. Ask "apply it?" and only edit files after an explicit yes.
+4. After editing, run the project's lint/typecheck or tests if available and
+   report pass/fail in one sentence.
+<!-- END vtai-agent:voice-code-review -->
+
+<!-- BEGIN vtai-agent:audit-log -->
+## Audit Log (managed by vtai-agent/audit-log)
+
+At the end of any session where files were changed or commands were run,
+append a short entry to .vtai-agent-audit.log in the repo root with:
+timestamp, what changed (files or commands), and outcome. Keep entries one
+line each. This file is local state and can be gitignored.
+<!-- END vtai-agent:audit-log -->
