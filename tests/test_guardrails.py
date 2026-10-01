@@ -161,6 +161,56 @@ def test_circuit_breaker_resets_after_window(g):
     assert "CIRCUIT BREAKER" not in g.check_shell("rm -rf /win").reason
 
 
+# ---------- audit of denials ----------
+def test_every_denial_is_audited(g, sandbox):
+    from sqlmodel import select
+
+    from vtai_agent import db
+    from vtai_agent.models import AuditLog
+    g.check_shell("rm -rf /nope")
+    with db.session_scope() as s:
+        details = [r.detail for r in
+                   s.exec(select(AuditLog).where(AuditLog.allowed == False)).all()]  # noqa: E712
+    assert any("rm -rf /nope" in d for d in details)
+
+
+def test_is_denied_unresolvable_path_is_true(g):
+    assert g.is_denied("/proc/1/root/../../\x00bad") is True
+
+
+def test_is_denied_on_protected_exact(g, sandbox):
+    assert g.is_denied(sandbox.protected)
+    assert g.is_denied(sandbox.protected / "secret.txt")
+    assert not g.is_denied(sandbox.writable)
+
+
+def test_deny_glob_lilke_ssh_child_expansion(g):
+    # '~/.ssh/**' must also block the literal dir and nested paths
+    assert g.is_denied("~/.ssh")
+    assert g.is_denied("~/.ssh/.ssh") or g.is_denied("~/.ssh/id_ecdsa")
+
+
+def test_check_writable_symlink_into_protected(g, sandbox):
+    link = sandbox.writable / "evil_link"
+    link.symlink_to(sandbox.protected)
+    with pytest.raises(GuardrailViolation):
+        g.check_writable(link / "secret.txt")
+
+
+def test_kill_switch_is_audited(g, sandbox):
+    from vtai_agent import db
+    from sqlmodel import select
+
+    from vtai_agent.models import AuditLog
+    (sandbox.settings.paths.data_dir / "KILL").touch()
+    with pytest.raises(GuardrailViolation):
+        g.ensure_not_killed()
+    with db.session_scope() as s:
+        actions = [a.action for a in
+                   s.exec(select(AuditLog).where(AuditLog.action == "abort")).all()]
+    assert actions, "kill-switch denial must be audited"
+
+
 # ---------- kill / dry-run ----------
 def test_kill_switch(g, sandbox):
     assert not g.kill_switch_active()

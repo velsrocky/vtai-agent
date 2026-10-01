@@ -112,7 +112,7 @@ class Guardrails:
         """Non-raising check used to filter scan results out of reports."""
         try:
             s = str(Path(path).expanduser().resolve())
-        except OSError:
+        except (OSError, ValueError):
             return True
         return any(
             fnmatch.fnmatch(s, pat) or self._within_literal_prefix(s, pat)

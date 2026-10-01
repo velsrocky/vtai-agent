@@ -52,3 +52,40 @@ uv run ruff check src/ tests/
 
 Config lives in `config/settings.toml`; env overrides use the `VT_` prefix
 with `__` nesting (e.g. `VT_GUARDRAILS__DRY_RUN_DEFAULT=false`).
+
+## Voice control (`agent-listen` / `agent-speak`)
+
+Both helpers talk to a local Lemonade Server (STT `Whisper-Tiny`, TTS
+`kokoro-v1`) at `http://localhost:13305`. Use `--seconds N` to change the
+record window, `--vad` for silence-based early stop, `LEMONADE_BASE_URL` to
+point elsewhere.
+
+### Troubleshooting
+
+- **Mic produces silence or clipped garbage transcripts**: the internal mic
+  boost is pinned too high and clips the ALC294 input. Fix (also applied at
+  every login via `~/.config/systemd/user/vtai-audio-fix.service`):
+
+  ```bash
+  amixer -c 2 sset 'Internal Mic Boost' 0
+  amixer -c 2 sset 'Capture' 75%
+  ```
+
+- **Headphone jack not detected**: the kernel reports no jack on the combo
+  port, so the headphone amp stays off. Check `pw-cli enum-params 53
+  EnumRoute` — the `analog-output-headphones` route shows `available: no`
+  until a headset is firmly plugged in. Route manually with
+  `wpctl set-route 38 1` if detection is flaky.
+
+- **Default source is the wrong mic**: list routes with
+  `pw-cli enum-params 53 Route` and select
+  with `wpctl set-route 47 <index>` (`0` = internal mic, `1` = headset mic).
+
+- **STT returns `[BLANK_AUDIO]` or noise transcripts**: verify levels with
+  `arecord -d 3 -f cd /tmp/t.wav` and inspect the peak; near 0 means the
+  selected route carries no signal, full-scale means clipping (lower the
+  boost).
+
+- **Files changed via `delegate_coding` are rolled back**: that's the
+  fail-safe default — pass `require_approval: false` after you've reviewed
+  the diff, or `verify_command` to gate on tests instead.

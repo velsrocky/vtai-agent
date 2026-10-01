@@ -119,8 +119,47 @@ class Settings(BaseSettings):
 _settings: Settings | None = None
 
 
+def validate_settings(s: Settings) -> None:
+    """Fail fast on malformed, silently-dangerous configuration. Called once
+    at startup so a bad settings.toml surfaces immediately, not mid-run."""
+    import fnmatch
+    import re
+
+    errs: list[str] = []
+    g = s.guardrails
+    if g.max_steps < 1:
+        errs.append("guardrails.max_steps must be >= 1")
+    if g.budget_usd_per_run < 0:
+        errs.append("guardrails.budget_usd_per_run must be >= 0")
+    if not g.shell_allowlist:
+        errs.append("guardrails.shell_allowlist is empty — run_shell will allow nothing")
+    for d in g.shell_extra_modes.values():
+        if d not in ("none", "read", "write"):
+            errs.append(f"invalid shell_extra_modes value: {d}")
+    unknown = set(g.shell_extra_modes) - set(g.shell_allowlist)
+    if unknown:
+        errs.append(f"shell_extra_modes references binaries not in shell_allowlist: {sorted(unknown)}")
+    for pat in g.deny_globs:
+        if not isinstance(pat, str) or not pat.strip():
+            errs.append(f"deny_globs contains an empty/invalid pattern: {pat!r}")
+            continue
+        try:
+            fnmatch.translate(pat)
+        except re.error:
+            errs.append(f"deny_globs pattern does not compile: {pat!r}")
+    for d in g.trusted_bin_dirs:
+        if not Path(d).is_dir():
+            errs.append(f"trusted_bin_dirs entry is not a directory: {d}")
+    for r in s.paths.writable_roots:
+        if not Path(r).exists():
+            errs.append(f"writable_roots entry does not exist: {r}")
+    if errs:
+        raise ValueError("invalid configuration:\n  - " + "\n  - ".join(errs))
+
+
 def get_settings() -> Settings:
     global _settings
     if _settings is None:
         _settings = Settings()
+        validate_settings(_settings)
     return _settings

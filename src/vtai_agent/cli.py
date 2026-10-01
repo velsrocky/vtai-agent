@@ -68,6 +68,31 @@ def cmd_goal(args) -> int:
     return 0 if result.status == "ok" else 1
 
 
+def cmd_audit(args) -> int:
+    from sqlmodel import select
+
+    from .models import AuditLog
+    with db.session_scope() as s:
+        q = select(AuditLog).order_by(AuditLog.id.desc()).limit(args.limit)
+        rows = [r.model_dump() for r in s.exec(q)]
+    if args.action:
+        rows = [r for r in rows if r["action"] == args.action]
+    if args.run_id is not None:
+        rows = [r for r in rows if r["run_id"] == args.run_id]
+    if args.allowed is not None:
+        rows = [r for r in rows if r["allowed"] == args.allowed]
+    if args.grep:
+        g = args.grep.lower()
+        rows = [r for r in rows if g in r["detail"].lower()]
+    if not rows:
+        print("no audit rows matched")
+        return 0
+    for r in rows:
+        verdict = "allow" if r["allowed"] else "DENY"
+        print(f"#{r['id']} run={r['run_id']} {verdict} {r['action']:12} {r['detail'][:100]}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="vtai", description="VT-AIAgent CLI")
     sub = p.add_subparsers(dest="command", required=True)
@@ -87,6 +112,17 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--execute", dest="dry_run", action="store_false",
                    help="Allow real changes (overrides config default)")
     g.set_defaults(func=cmd_goal)
+
+    a = sub.add_parser("audit", help="List recent audit-log entries")
+    a.add_argument("--limit", type=int, default=50)
+    a.add_argument("--action", help="Filter by action (shell, write, delegate, ...)")
+    a.add_argument("--run-id", type=int, default=None)
+    a.add_argument("--allowed", dest="allowed", action="store_true", default=None,
+                   help="Only show allowed actions")
+    a.add_argument("--denied", dest="allowed", action="store_false",
+                   help="Only show denials")
+    a.add_argument("--grep", help="Case-insensitive substring on detail")
+    a.set_defaults(func=cmd_audit)
 
     sub.add_parser("serve", help="Run the MCP server over stdio").set_defaults(func=cmd_serve)
     return p

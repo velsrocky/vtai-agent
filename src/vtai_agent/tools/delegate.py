@@ -39,6 +39,13 @@ class DelegateCodingInput(BaseModel):
                     "are checked against the repo dir.",
     )
     auto_rollback: bool = Field(default=True, description="Restore the git snapshot if verification fails.")
+    require_approval: bool = Field(
+        default=False,
+        description="After the delegate runs and verification passes, show the "
+                    "diff and wait for explicit human approval before keeping the "
+                    "changes. Non-interactive sessions roll back and report "
+                    "'needs_approval' instead.",
+    )
     timeout: float = Field(default=600.0, ge=10, le=3600, description="Seconds before the delegate is killed.")
     skip_permissions: bool = Field(
         default=False,
@@ -136,6 +143,21 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
                     detail=result,
                 )
 
+        # human approval gate: only accept the diff when a human says so
+        if inp.require_approval and code == 0:
+            approved, note = await self._approve(diff, work)
+            result["approval_note"] = note
+            if not approved:
+                await self._restore(work, snapshot, run_id, "human rejected")
+                result["rolled_back"] = True
+                result["reason"] = "human did not approve the diff"
+                return ToolResult(
+                    ok=False,
+                    summary=f"{inp.cli} completed but was not approved; rolled back. "
+                            f"Re-run with require_approval=false to keep changes.",
+                    detail=result,
+                )
+
         # `git stash create` never adds to the stash list, so there is nothing
         # to drop; the snapshot ref simply becomes unreachable and is pruned.
         return ToolResult(
@@ -143,6 +165,20 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
             summary=f"{inp.cli} completed in {work}; diff captured",
             detail=result,
         )
+
+    async def _approve(self, diff_stat: str, work: Path) -> tuple[bool, str]:
+        import sys
+        if not sys.stdin.isatty():
+            db.audit(None, "delegate", "approval required but stdin is not a TTY; rolling back",
+                     allowed=False)
+            return False, "non-interactive: no approval possible"
+        print(f"\n--- {work} diff (--stat) ---\n{diff_stat[:2000]}\n", flush=True)
+        try:
+            ans = input("Keep these changes? [y/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False, "no answer"
+        return (ans in {"y", "yes"}), f"human answered {ans!r}"
+
 
     def _build_argv(self, binary: str, inp: DelegateCodingInput) -> list[str]:
         if binary == "opencode":
