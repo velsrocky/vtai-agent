@@ -75,6 +75,7 @@ Known facts:
   clips the input and corrupts transcription.
 - Voice mode requires agent-listen + agent-speak; noisy transcripts mean the
   mic level is wrong, not that the user misspoke.
+- Voice fixes (2026-10-02): assistant is Vitae; `agent-listen --vad` stops on silence; errors carry exit codes; `DelegateCodingTool.require_approval` defaults true.
 
 Rules:
 
