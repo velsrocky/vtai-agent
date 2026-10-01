@@ -40,11 +40,13 @@ class DelegateCodingInput(BaseModel):
     )
     auto_rollback: bool = Field(default=True, description="Restore the git snapshot if verification fails.")
     require_approval: bool = Field(
-        default=False,
+        default=True,
         description="After the delegate runs and verification passes, show the "
                     "diff and wait for explicit human approval before keeping the "
                     "changes. Non-interactive sessions roll back and report "
-                    "'needs_approval' instead.",
+                    "'needs_approval' instead. Defaults to True — an unattended "
+                    "run cannot silently keep its changes; pass false only when "
+                    "a human has already reviewed the task.",
     )
     timeout: float = Field(default=600.0, ge=10, le=3600, description="Seconds before the delegate is killed.")
     skip_permissions: bool = Field(
