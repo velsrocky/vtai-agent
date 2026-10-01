@@ -19,8 +19,9 @@ until the user says to stop ("stop voice mode", "text mode", ...).
 
 ### Helpers on PATH
 
-- `agent-listen [--seconds N]` — records the default microphone and prints the
-  transcript of what was said.
+- `agent-listen [--seconds N] [--vad]` — records the default microphone and
+  prints the transcript; `--vad` stops early on 1.5s of silence. Clear errors
+  exit nonzero: 6 = no speech, 4 = STT unreachable, 3 = recorder failed.
 - `agent-speak "text"` or `echo "text" | agent-speak` — plays the text aloud.
 
 ### Direct API fallback
