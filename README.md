@@ -13,7 +13,7 @@ opencode / Claude Code / pi — and drivable directly via the `vtai` CLI.
 | `backup_sync` | rsync incremental backup with verification; `--delete` is opt-in |
 | `transcode_media` | VAAPI-accelerated batch video transcode; never touches originals |
 | `disk_audit` | Read-only scan for reclaimable disk space |
-| `delegate_coding` | Hand tasks to opencode/claude/pi; git snapshot + verify + rollback |
+| `delegate_coding` | Hand tasks to opencode/claude/pi; git snapshot + verify + rollback; require human approval by default |
 
 ## Safety model
 
@@ -51,7 +51,35 @@ uv run ruff check src/ tests/
 ```
 
 Config lives in `config/settings.toml`; env overrides use the `VT_` prefix
-with `__` nesting (e.g. `VT_GUARDRAILS__DRY_RUN_DEFAULT=false`).
+with `__` nesting (e.g. `VT_GUARDRAILS__DRY_RUN_DEFAULT=false`). Config is
+validated at startup (`validate_settings`) — a bad `deny_globs` pattern or a
+missing writable root fails fast, not mid-run.
+
+## Delegate coding
+
+`delegate_coding` snapshots the target repo, runs the chosen CLI headlessly,
+captures the diff, and on `verify_command` failure (or timeout / non-zero
+exit) rolls back. Two extra guards worth knowing:
+
+- **Human approval gate**: `require_approval` defaults to `true`. Interactively
+  it shows `git diff --stat` and asks before keeping changes; non-interactive
+  runs (MCP, scripted) roll back instead of keeping edits. Pass
+  `"require_approval": false` only when a human has already reviewed the plan.
+- **`pi` needs credentials**: with no authenticated provider, `pi -p` exits 0
+  having emitted a tool-call JSON block and applied nothing. The tool now
+  fails closed with a clear message. Run `pi auth check` — or prefer
+  `opencode` / `claude` — before delegating to pi.
+
+## Audit log
+
+Every allow/deny is stored in `~/.vtaiagent/vtai.db`. Query it without a SQL
+client:
+
+```bash
+uv run vtai audit --limit 20
+uv run vtai audit --denied --grep ssh
+uv run vtai audit --action delegate --run-id 193
+```
 
 ## Voice control (`agent-listen` / `agent-speak`)
 

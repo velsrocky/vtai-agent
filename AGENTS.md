@@ -76,6 +76,7 @@ Known facts:
 - Voice mode requires agent-listen + agent-speak; noisy transcripts mean the
   mic level is wrong, not that the user misspoke.
 - Voice fixes (2026-10-02): assistant is Vitae; `agent-listen --vad` stops on silence; errors carry exit codes; `DelegateCodingTool.require_approval` defaults true.
+- Delegate gotcha (2026-10-02): pi has no authenticated provider here; it exits 0 with a raw tool-call JSON and no diff, and delegate_coding now fails closed. Use opencode/claude or run `pi auth` first.
 
 Rules:
 

@@ -53,6 +53,13 @@ rollback result lands in the audit log. Verify commands go through the same
 sandbox as `run_shell` — `pytest` is allowlisted out of the box; anything else
 needs an entry in `shell_allowlist` + `shell_extra_modes`.
 
+`require_approval` defaults to `true`: interactive runs show `git diff --stat`
+and ask before keeping changes, while non-interactive runs roll back and report
+`needs_approval`. Pass `"require_approval": false` to keep edits automatically
+after verification passes. Also note `cli: "pi"` only works when pi has an
+authenticated provider (`pi auth check`); otherwise it returns a failure
+complaining the delegate applied no changes.
+
 ## What gets denied
 
 ```bash

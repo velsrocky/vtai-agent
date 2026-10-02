@@ -1,5 +1,43 @@
 # Changelog
 
+## [Unreleased] - 2026-10-02
+
+### Added
+- **`vtai audit`**: list and filter audit-log entries by `--limit`, `--action`,
+  `--run-id`, `--allowed`/`--denied`, and `--grep` (substring on detail).
+- **`agent-listen --vad`**: silence-based turn detection — records until 1.5s of
+  quiet after speech, instead of always using the fixed `--seconds` window.
+- **`delegate_coding.require_approval`** (default `true`): after the delegate
+  runs and optional `verify_command` passes, the tool shows `git diff --stat`
+  and requires explicit human approval before keeping changes. Non-interactive
+  runs roll back and report `needs_approval` instead of silently keeping edits.
+- **`validate_settings()` at startup**: fails fast on an empty
+  `shell_allowlist`, nonexistent `trusted_bin_dirs`/`writable_roots`, invalid
+  `deny_globs` patterns, or `shell_extra_modes` keys not in the allowlist.
+- **Audit-log doc + session memory** blocks in `AGENTS.md`.
+
+### Fixed
+- **`guardrails.is_denied`**: a path that cannot be resolved (e.g. embedded null
+  byte raising `ValueError`) is now treated as denied instead of crashing.
+- **`agent-listen` / `agent-speak` hardening**: `--seconds` is validated,
+  STT/TTS requests are retried (3x), and failures exit non-zero with clear
+  reasons — 3 recorder failed, 4 STT/TTS unreachable, 5 STT bad JSON,
+  6 no speech detected. Long transcripts (probable garbage) are flagged.
+- **`delegate_coding` with `pi`**: when `pi` has no authenticated provider it
+  exits 0 while emitting a raw tool-call JSON block and applying nothing. The
+  tool now detects that shape and fails closed (``"did not apply any changes"``)
+  with a pointer to `pi auth check`. Prefer `opencode` or `claude` until `pi`
+  is authenticated on this machine.
+- **Voice audio on ALC294**: internal/headset mic boost pinned at max clipped
+  input; a systemd user service (`vtai-agent-audio-fix`) now resets
+  `Internal Mic Boost` and `Headset Mic Boost` to 0 and `Capture` to 75% at
+  every login, documented in `README.md` troubleshooting.
+
+### Tests
+- 8 new tests in `tests/test_guardrails.py` (denial auditing, kill-switch
+  audit, symlink-into-protected escape, unresolvable paths, deny-glob exact
+  dir) and 1 new `delegate_coding` fail-closed test; 60 tests pass total.
+
 ## [0.3.2] - 2026-09-26
 
 ### Added
