@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -33,6 +34,15 @@ class ProviderLocal(_Priced):
     api_key: str = "not-needed"
 
 
+# run_shell only executes binaries resolving under one of these dirs.
+def _default_trusted_bin_dirs() -> list[str]:
+    if sys.platform == "win32":
+        return [r"C:\Windows\System32", r"C:\Windows"]
+    if sys.platform == "darwin":
+        return ["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"]
+    return ["/usr/bin", "/bin", "/usr/local/bin"]
+
+
 class Guardrails(BaseModel):
     dry_run_default: bool = True
     max_steps: int = 40
@@ -41,7 +51,7 @@ class Guardrails(BaseModel):
     shell_allowlist: list[str] = Field(default_factory=list)
     deny_globs: list[str] = Field(default_factory=list)
     # run_shell only executes binaries resolving under one of these dirs.
-    trusted_bin_dirs: list[str] = ["/usr/bin", "/bin", "/usr/local/bin"]
+    trusted_bin_dirs: list[str] = Field(default_factory=_default_trusted_bin_dirs)
     # Echo-loop breaker: after this many denials of the *same* action+detail
     # within denial_window_seconds, subsequent denial messages carry a
     # CIRCUIT BREAKER note telling the model to stop retrying.

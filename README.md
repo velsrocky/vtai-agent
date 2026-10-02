@@ -88,6 +88,21 @@ Both helpers talk to a local Lemonade Server (STT `Whisper-Tiny`, TTS
 record window, `--vad` for silence-based early stop, `LEMONADE_BASE_URL` to
 point elsewhere.
 
+Cross-platform notes:
+
+- `arecord` is used for recording on Linux; elsewhere the helpers fall back
+  to `ffmpeg` (`-f pulse` / `avfoundation`), so macOS and Windows work too.
+- `--vad` currently requires Linux `arecord`; on other platforms use
+  `--seconds N`.
+- Playback tries `ffplay` → `afplay` (macOS) → `mpg123` → `aplay` in order.
+- The ALSA mic-level fix and `vtai-audio-fix` systemd unit below are
+  Linux-specific; Windows and macOS handle this in System Settings.
+- `guardrails.trusted_bin_dirs` defaults per OS (`C:\Windows\System32`,
+  `/usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin`, and the Linux set);
+  override in `settings.toml` for custom installs.
+- `transcode_media`'s VAAPI path is Linux-only; on macOS/Windows pass
+  `"codec": "libx264"` and omit the render-node device.
+
 ### Troubleshooting
 
 - **Mic produces silence or clipped garbage transcripts**: the internal mic
