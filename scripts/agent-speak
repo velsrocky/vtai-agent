@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -uo pipefail
+BASE="${LEMONADE_BASE_URL:-http://localhost:13305}"
+TTS_MODEL="${LEMONADE_TTS_MODEL:-kokoro-v1}"
+TEXT="${*:-$(cat)}"
+if [ -z "${TEXT// }" ]; then
+  echo "agent-speak: empty input text" >&2; exit 2
+fi
+if [ "${#TEXT}" -gt 4000 ]; then
+  echo "agent-speak: input too long (${#TEXT} chars, max 4000)" >&2; exit 2
+fi
+TMP="$(mktemp --suffix=.mp3)"
+trap 'rm -f "$TMP"' EXIT
+ok=0
+for attempt in 1 2 3; do
+  curl -sf --max-time 60 -X POST "$BASE/v1/audio/speech" \
+    -H "Content-Type: application/json" \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"model":sys.argv[1],"input":sys.argv[2],"voice":"shimmer"}))' "$TTS_MODEL" "$TEXT")" \
+    -o "$TMP" && ok=1 && break
+  echo "agent-speak: TTS request failed (attempt $attempt/3)" >&2
+  sleep 1
+done
+if [ "$ok" != 1 ] || [ ! -s "$TMP" ]; then
+  echo "agent-speak: TTS server unreachable at $BASE" >&2; exit 4
+fi
+if command -v ffplay >/dev/null 2>&1; then
+  ffplay -nodisp -autoexit -loglevel error "$TMP"
+elif command -v afplay >/dev/null 2>&1; then
+  afplay "$TMP"
+elif command -v mpg123 >/dev/null 2>&1; then
+  mpg123 -q "$TMP"
+elif command -v aplay >/dev/null 2>&1; then
+  aplay "$TMP"
+else
+  echo "agent-speak: need ffplay, mpg123, aplay, or afplay" >&2; exit 1
+fi

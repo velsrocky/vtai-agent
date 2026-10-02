@@ -88,6 +88,13 @@ Both helpers talk to a local Lemonade Server (STT `Whisper-Tiny`, TTS
 record window, `--vad` for silence-based early stop, `LEMONADE_BASE_URL` to
 point elsewhere.
 
+The scripts are versioned in `scripts/`; install them with:
+
+```bash
+cp scripts/agent-listen scripts/agent-speak ~/.local/bin/
+chmod +x ~/.local/bin/agent-listen ~/.local/bin/agent-speak
+```
+
 Cross-platform notes:
 
 - `arecord` is used for recording on Linux; elsewhere the helpers fall back

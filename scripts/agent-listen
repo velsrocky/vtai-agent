@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+set -uo pipefail
+VAD=0
+SECONDS_TO_RECORD=5
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --vad) VAD=1; shift ;;
+    --seconds) SECONDS_TO_RECORD="${2:-5}"; shift 2 ;;
+    *) [[ "$1" =~ ^[0-9]+$ ]] && SECONDS_TO_RECORD="$1"; shift ;;
+  esac
+done
+if ! [[ "$SECONDS_TO_RECORD" =~ ^[0-9]+$ ]] || [ "$SECONDS_TO_RECORD" -lt 1 ] || [ "$SECONDS_TO_RECORD" -gt 600 ]; then
+  echo "agent-listen: --seconds must be an integer between 1 and 600 (got '${SECONDS_TO_RECORD}')" >&2; exit 2
+fi
+BASE="${LEMONADE_BASE_URL:-http://localhost:13305}"
+STT_MODEL="${LEMONADE_STT_MODEL:-Whisper-Tiny}"
+WAV="$(mktemp --suffix=.wav)"
+trap 'rm -f "$WAV"' EXIT
+METER='import sys,time,struct,math
+buf=sys.stdin.buffer
+end=time.time()+float(sys.argv[1])
+while time.time()<end:
+    chunk=buf.read(3200)
+    if not chunk: break
+    n=len(chunk)//2
+    if n==0: continue
+    vals=struct.unpack(f"<{n}h",chunk[:n*2])
+    rms=math.sqrt(sum(v*v for v in vals)/n)
+    level=min(rms/6000.0,1.0)
+    bar="█"*int(level*20)
+    sys.stdout.write("\r● Listening  ["+bar.ljust(20)+"] "+f"{level:.0%}"+"   ")
+    sys.stdout.flush()
+sys.stdout.write("\n")'
+record_ok=0
+if [ "$VAD" = 1 ] && command -v arecord >/dev/null 2>&1; then
+  python3 - "$SECONDS_TO_RECORD" > "$WAV" <<'VADPY'
+import math, struct, subprocess, sys, time
+maxlen = float(sys.argv[1]) * 16000 * 2
+proc = subprocess.Popen(
+    ["arecord", "-q", "-r", "16000", "-c", "1", "-f", "S16_LE", "-t", "raw"],
+    stdout=subprocess.PIPE)
+t0 = time.time()
+buf = b""
+started = False
+silence = 0.0
+chunk = 1600  # 50ms @16kHz S16LE
+try:
+    while time.time() - t0 < maxlen / (16000 * 2):
+        data = proc.stdout.read(chunk)
+        if not data:
+            break
+        n = len(data) // 2
+        if n == 0:
+            continue
+        vals = struct.unpack(f"<{n}h", data[: n * 2])
+        rms = math.sqrt(sum(v * v for v in vals) / n)
+        speech = rms > 6000
+        if speech:
+            started = True
+            silence = 0.0
+        elif started:
+            silence += 0.05
+            if silence > 1.5:
+                break
+        buf += data
+        level = min(rms / 6000.0, 1.0)
+        sys.stderr.write("\r● Listening  [" + "█" * int(level * 20) + "] " + f"{level:.0%}" + "   ")
+        sys.stderr.flush()
+finally:
+    proc.kill()
+sys.stderr.write("\n")
+header = b"RIFF" + struct.pack("<I", 36 + len(buf)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16) + b"data" + struct.pack("<I", len(buf))
+sys.stdout.buffer.write(header + buf)
+VADPY
+  record_ok=1
+elif command -v arecord >/dev/null 2>&1; then
+  arecord -q -d "$SECONDS_TO_RECORD" -r 16000 -c 1 -f S16_LE -t wav | tee "$WAV" | python3 -u -c "$METER" "$SECONDS_TO_RECORD" >&2 && record_ok=1 || true
+elif command -v ffmpeg >/dev/null 2>&1; then
+  case "$(uname -s)" in
+    Darwin) FF_IN="-f avfoundation -i :0" ;;
+    MINGW*|MSYS*|CYGWIN*) FF_IN="-f dshow -i audio=Microphone" ;;
+    *) FF_IN="-f pulse -i default" ;;
+  esac
+  ffmpeg -hide_banner -loglevel error $FF_IN -t "$SECONDS_TO_RECORD" -ar 16000 -ac 1 -f wav pipe:1 | tee "$WAV" | python3 -u -c "$METER" "$SECONDS_TO_RECORD" >&2 && record_ok=1 || true
+else
+  echo "agent-listen: need arecord or ffmpeg" >&2; exit 1
+fi
+if [ "$record_ok" != 1 ] || [ ! -s "$WAV" ]; then
+  echo "agent-listen: recording failed (mic not capturing)" >&2; exit 3
+fi
+for attempt in 1 2 3; do
+  resp="$(curl -sf --max-time 60 -X POST "$BASE/v1/audio/transcriptions" \
+    -F "file=@$WAV" -F "model=$STT_MODEL")" && break
+  echo "agent-listen: STT request failed (attempt $attempt/3)" >&2
+  sleep 1
+done
+if [ -z "${resp:-}" ]; then
+  echo "agent-listen: STT server unreachable at $BASE" >&2; exit 4
+fi
+python3 - "$resp" <<'PY'
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+except json.JSONDecodeError:
+    sys.stderr.write("agent-listen: STT returned invalid JSON: %r\n" % sys.argv[1][:200])
+    raise SystemExit(5)
+text = (data.get("text") or "").strip()
+if not text or text in {"[BLANK_AUDIO]", "<|audio|>", "(silence)"}:
+    sys.stderr.write("agent-listen: no speech detected — check mic input\n")
+    raise SystemExit(6)
+if len(text) > 2000:
+    sys.stderr.write("agent-listen: transcript suspiciously long (%d chars) — possible garbage\n" % len(text))
+print(text)
+PY
