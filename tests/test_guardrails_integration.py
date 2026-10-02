@@ -122,3 +122,29 @@ def test_delegate_dry_run_touches_nothing(sandbox, cli):
     status = os.popen(f"git -C {repo} status --porcelain").read()
     assert "?? untracked.txt" in status
     assert not Path(repo, ".git/refs/stash").exists()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_delegate_pi_json_only_output_is_failure(sandbox, monkeypatch):
+    repo = sandbox.writable / "repo2"
+    repo.mkdir()
+    init = (f"git -C {repo} init -q && git -C {repo} config user.email t@t && "
+            f"git -C {repo} config user.name t")
+    assert os.system(init) == 0
+    (repo / "a.txt").write_text("a")
+    assert os.system(f"git -C {repo} add -A && git -C {repo} commit -qm init") == 0
+
+    async def fake_run(self, argv, cwd, timeout):
+        return '{"name": "write", "arguments": {"path": "x"}}\n', "", 0
+
+    monkeypatch.setattr(DelegateCodingTool, "_run", fake_run)
+    monkeypatch.setattr(
+        "vtai_agent.tools.delegate.shutil.which", lambda n: f"/usr/bin/{n}",
+    )
+    tool = DelegateCodingTool(_g(sandbox))
+    r = asyncio.run(tool.run(DelegateCodingInput(
+        cli="pi", prompt="noop", working_dir=str(repo), dry_run=False,
+        require_approval=False,
+    )))
+    assert not r.ok
+    assert "did not apply any changes" in r.summary

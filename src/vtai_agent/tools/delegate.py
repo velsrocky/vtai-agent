@@ -123,6 +123,25 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
             **plan, "returncode": code, "diff": diff[-4000:],
             "stdout": stdout[-4000:], "stderr": stderr[-2000:],
         }
+        # A delegate that "succeeds" but produced no changes and emitted a raw
+        # tool-call JSON (pi does this when it has no authenticated provider)
+        # must not be reported as success — fail closed.
+        if code == 0 and not diff.strip():
+            stripped = stdout.lstrip()
+            if stripped.startswith("{") and '"name"' in stripped and '"arguments"' in stripped:
+                result.update({
+                    "reason": (
+                        "delegate proposed a tool call but never executed it "
+                        f"(check {binary} auth/session; pi returns this when "
+                        "no provider is authenticated)"
+                    ),
+                    "rolled_back": False,
+                })
+                return ToolResult(
+                    ok=False,
+                    summary=f"{inp.cli} did not apply any changes",
+                    detail=result,
+                )
 
         if code != 0:
             if inp.auto_rollback:
