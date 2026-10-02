@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - 2026-10-02
+## [0.4.0] - 2026-10-02
 
 ### Added
 - **`vtai audit`**: list and filter audit-log entries by `--limit`, `--action`,
