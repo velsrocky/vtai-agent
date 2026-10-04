@@ -118,3 +118,72 @@ def test_media_dry_run_skips_output_dir(sandbox):
     assert r.ok and r.dry_run
     sources = [j["source"] for j in r.detail["jobs"]]
     assert sources == [str(d / "a.mp4")]
+
+
+# ---------- auto_mode ----------
+def _judge_model(verdicts: list[str]):
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    calls = {"n": 0}
+
+    def fn(messages, info):
+        calls["n"] += 1
+        v = verdicts[min(calls["n"] - 1, len(verdicts) - 1)]
+        return ModelResponse(parts=[TextPart(v)])
+
+    return FunctionModel(fn)
+
+
+def test_auto_mode_stops_when_judge_approves(sandbox, monkeypatch, tmp_path):
+    from vtai_agent.tools.automode import AutoModeInput, AutoModeTool
+
+    replies = iter(["wrong answer", "correct answer"])
+
+    async def fake_cli(self, binary, cli, prompt, cwd, timeout):
+        return next(replies)
+
+    monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
+    monkeypatch.setattr(
+        "vtai_agent.tools.automode.shutil.which", lambda n: f"/usr/bin/{n}")
+    tool = AutoModeTool(_g(sandbox), model=_judge_model(
+        ["INSUFFICIENT: off by one", "OK"]))
+    r = asyncio.run(tool.run(AutoModeInput(
+        goal="add a and b", working_dir=str(sandbox.writable), dry_run=False)))
+    assert r.ok and r.detail["iterations"] == 2
+    assert r.detail["final_answer"] == "correct answer"
+    assert r.detail["history"][0]["critique"].startswith("off by one")
+
+
+def test_auto_mode_gives_up_after_max_iterations(sandbox, monkeypatch):
+    from vtai_agent.tools.automode import AutoModeInput, AutoModeTool
+
+    async def fake_cli(self, binary, cli, prompt, cwd, timeout):
+        return "still wrong"
+
+    monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
+    monkeypatch.setattr(
+        "vtai_agent.tools.automode.shutil.which", lambda n: f"/usr/bin/{n}")
+    tool = AutoModeTool(_g(sandbox), model=_judge_model(["INSUFFICIENT: nope"]))
+    r = asyncio.run(tool.run(AutoModeInput(
+        goal="x", working_dir=str(sandbox.writable), max_iterations=2,
+        dry_run=False)))
+    assert not r.ok and r.detail["iterations"] == 2
+
+
+def test_auto_mode_dry_run_does_not_run(sandbox, monkeypatch):
+    from vtai_agent.tools.automode import AutoModeInput, AutoModeTool
+
+    called = {"n": 0}
+
+    async def fake_cli(self, binary, cli, prompt, cwd, timeout):
+        called["n"] += 1
+        return "x"
+
+    monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
+    monkeypatch.setattr(
+        "vtai_agent.tools.automode.shutil.which", lambda n: f"/usr/bin/{n}")
+    tool = AutoModeTool(_g(sandbox))
+    r = asyncio.run(tool.run(AutoModeInput(
+        goal="x", working_dir=str(sandbox.writable), dry_run=True)))
+    assert r.ok and r.dry_run and called["n"] == 0

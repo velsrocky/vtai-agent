@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-04
+
+### Added
+- **`auto_mode` tool**: the agent loops a coding CLI (opencode/claude/pi),
+  reviews its reply against the goal with the configured model, and
+  re-prompts with the critique until the answer satisfies the goal or
+  `max_iterations`. Trigger it from opencode/claude prompts that start with
+  `@vt-ai_automode_on` — the MCP server's instructions route those to the
+  tool. Dry-run supported; each iteration is audited.
+
 ## [0.5.1] - 2026-10-04
 
 ### Fixed

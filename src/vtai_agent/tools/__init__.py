@@ -6,10 +6,11 @@ from .backup import BackupSyncTool
 from .media import MediaTranscodeTool
 from .disk import DiskAuditTool
 from .delegate import DelegateCodingTool
+from .automode import AutoModeTool
 
 __all__ = [
     "Tool", "ToolError", "ToolResult", "ToolRegistry", "registry",
     "OrganizeFilesTool", "ShellTool", "SystemInfoTool",
     "BackupSyncTool", "MediaTranscodeTool", "DiskAuditTool",
-    "DelegateCodingTool",
+    "DelegateCodingTool", "AutoModeTool",
 ]

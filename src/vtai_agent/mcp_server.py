@@ -13,6 +13,7 @@ from .guardrails import GuardrailViolation, reset_current_run, set_current_run
 from .tools import (
     BackupSyncTool,
     DelegateCodingTool,
+    AutoModeTool,
     DiskAuditTool,
     MediaTranscodeTool,
     OrganizeFilesTool,
@@ -34,6 +35,7 @@ def register_tools() -> None:
     registry.register(MediaTranscodeTool())
     registry.register(DiskAuditTool())
     registry.register(DelegateCodingTool())
+    registry.register(AutoModeTool())
 
 
 def build_server() -> MCPServer:
@@ -48,7 +50,9 @@ def build_server() -> MCPServer:
         instructions=(
             "Prefer dry_run=true to preview before acting. File moves stay inside "
             "the target directory (writable_roots). Shell binaries not in the "
-            "allowlist are rejected. All actions are logged to the audit DB."
+            "allowlist are rejected. All actions are logged to the audit DB. "
+            "If the user's message starts with '@vt-ai_automode_on', strip that "
+            "marker and call the auto_mode tool with the remainder as the goal."
         ),
         version=__version__,
     )
@@ -197,6 +201,29 @@ def build_server() -> MCPServer:
             "skip_permissions": skip_permissions,
             **({"require_approval": require_approval}
                if require_approval is not None else {}),
+        })
+
+    @server.tool()
+    async def auto_mode(goal: str, working_dir: str = ".", cli: str = "opencode",
+                        max_iterations: int = 3, timeout: float = 600.0,
+                        dry_run: bool | None = None) -> str:
+        """Autonomous loop: dispatch the goal to a coding CLI (opencode by
+        default), review the reply against the goal, and iterate with
+        corrective prompts until the answer satisfies the goal or
+        max_iterations is reached. Use this for the '@vt-ai_automode_on'
+        keyword.
+
+        Args:
+            goal: The full goal or question to satisfy.
+            working_dir: Project directory the CLI runs in (must be writable).
+            cli: opencode | claude | pi
+            max_iterations: Max review/reprompt rounds (1-10).
+            timeout: Per-iteration seconds before the CLI is killed.
+            dry_run: Preview only (defaults to config dry_run_default).
+        """
+        return await _call("auto_mode", {
+            "goal": goal, "working_dir": working_dir, "cli": cli,
+            "max_iterations": max_iterations, "timeout": timeout, "dry_run": dry_run,
         })
 
     return server

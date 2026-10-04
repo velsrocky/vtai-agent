@@ -83,6 +83,19 @@ local Ollama models on this box emit tool calls as raw JSON text even when
 native tool schemas are provided (verified 2026-10-03 with qwen2.5-coder:7b),
 so the text protocol behaves identically across local and cloud providers.
 
+## Auto mode
+
+`auto_mode` runs the loop you describe: it dispatches the goal to a coding
+CLI (opencode by default), reviews the reply against the goal with the
+configured model, and if the reply is insufficient, sends a follow-up prompt
+quoting the critique — up to `max_iterations`. From inside opencode or
+Claude Code, start the prompt with `@vt-ai_automode_on`: the MCP server's
+instructions route that to the tool.
+
+```bash
+uv run vtai run auto_mode --params '{"goal":"add a unit test for parser.py","working_dir":".","max_iterations":3}'
+```
+
 ## Delegate coding
 
 `delegate_coding` snapshots the target repo, runs the chosen CLI headlessly,
