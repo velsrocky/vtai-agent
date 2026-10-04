@@ -51,8 +51,9 @@ def build_server() -> MCPServer:
             "Prefer dry_run=true to preview before acting. File moves stay inside "
             "the target directory (writable_roots). Shell binaries not in the "
             "allowlist are rejected. All actions are logged to the audit DB. "
-            "If the user's message starts with '@vt-ai_automode_on', strip that "
-            "marker and call the auto_mode tool with the remainder as the goal."
+            "If the user's message starts with '@vt-ai_automode_on', 'automode_on', "
+            "or '/automode', strip that marker and call the auto_mode tool with "
+            "the remainder as the goal."
         ),
         version=__version__,
     )
