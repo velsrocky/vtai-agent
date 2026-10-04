@@ -222,6 +222,9 @@ def build_server() -> MCPServer:
             timeout: Per-iteration seconds before the CLI is killed.
             dry_run: Preview only (defaults to config dry_run_default).
         """
+        if working_dir == ".":  # default: the first writable root is a sane cwd
+            roots = get_settings().paths.writable_roots
+            working_dir = str(roots[0]) if roots else working_dir
         return await _call("auto_mode", {
             "goal": goal, "working_dir": working_dir, "cli": cli,
             "max_iterations": max_iterations, "timeout": timeout, "dry_run": dry_run,
