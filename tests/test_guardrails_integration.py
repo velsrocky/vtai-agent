@@ -1,6 +1,7 @@
 import asyncio
 import os
 import shutil
+
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ from vtai_agent.guardrails import Guardrails, GuardrailViolation
 from vtai_agent.tools.backup import BackupSyncInput, BackupSyncTool
 from vtai_agent.tools.delegate import DelegateCodingInput, DelegateCodingTool
 from vtai_agent.tools.shell import ShellInput, ShellTool
+
+_REAL_WHICH = shutil.which
 
 
 def _g(sandbox):
@@ -139,7 +142,7 @@ def test_delegate_pi_json_only_output_is_failure(sandbox, monkeypatch):
 
     monkeypatch.setattr(DelegateCodingTool, "_run", fake_run)
     monkeypatch.setattr(
-        "vtai_agent.tools.delegate.shutil.which", lambda n: f"/usr/bin/{n}",
+        "vtai_agent.tools.delegate.shutil.which", lambda n: _REAL_WHICH(n) or f"/usr/bin/{n}",
     )
     tool = DelegateCodingTool(_g(sandbox))
     r = asyncio.run(tool.run(DelegateCodingInput(

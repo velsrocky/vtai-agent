@@ -3,6 +3,7 @@ media job enumeration. Guardrails are covered in test_guardrails*."""
 
 import asyncio
 import shutil
+
 import subprocess
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from vtai_agent.guardrails import Guardrails
 from vtai_agent.tools.delegate import DelegateCodingInput, DelegateCodingTool
 from vtai_agent.tools.files import OrganizeFilesInput, OrganizeFilesTool
 from vtai_agent.tools.media import MediaTranscodeTool, TranscodeMediaInput
+
+_REAL_WHICH = shutil.which
 
 
 def _g(sandbox) -> Guardrails:
@@ -69,7 +72,7 @@ def test_delegate_rolls_back_on_failed_verify(sandbox, monkeypatch):
 
     monkeypatch.setattr(DelegateCodingTool, "_run", fake_run)
     monkeypatch.setattr("vtai_agent.tools.delegate.shutil.which",
-                        lambda n: f"/usr/bin/{n}")
+                        lambda n: _REAL_WHICH(n) or f"/usr/bin/{n}")
     tool = DelegateCodingTool(_g(sandbox))
     # `ls /nonexistent-definitely` exits non-zero -> verify gate fails
     r = asyncio.run(tool.run(DelegateCodingInput(
@@ -92,7 +95,7 @@ def test_delegate_keeps_changes_when_verify_passes(sandbox, monkeypatch):
 
     monkeypatch.setattr(DelegateCodingTool, "_run", fake_run)
     monkeypatch.setattr("vtai_agent.tools.delegate.shutil.which",
-                        lambda n: f"/usr/bin/{n}")
+                        lambda n: _REAL_WHICH(n) or f"/usr/bin/{n}")
     tool = DelegateCodingTool(_g(sandbox))
     # `ls <repo>` succeeds -> verify gate passes -> changes kept
     r = asyncio.run(tool.run(DelegateCodingInput(
