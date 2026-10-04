@@ -67,7 +67,7 @@ pytest = "write"
 [paths]
 # Roots the agent may write to. Anything outside is rejected.
 writable_roots = [
-  "~/Downloads", "~/Documents/vt-data", "/tmp/vtaiagent",
+  "~/Downloads", "~/Documents/vt-data", "~/.vtaiagent/tmp",
 ]
 data_dir = "~/.vtaiagent"   # sqlite db, audit log, screenshots
 

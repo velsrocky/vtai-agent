@@ -171,6 +171,7 @@ def build_server() -> MCPServer:
                               dry_run: bool | None = None,
                               verify_command: str | None = None,
                               auto_rollback: bool = True,
+                              require_approval: bool | None = None,
                               timeout: float = 600.0,
                               skip_permissions: bool = False) -> str:
         """Delegate a coding task to opencode, claude, or pi in headless mode.
@@ -184,6 +185,8 @@ def build_server() -> MCPServer:
             dry_run: Snapshot and plan only (defaults to config dry_run_default).
             verify_command: Allowlisted command that must pass afterward, e.g. "pytest".
             auto_rollback: Restore the snapshot if verification fails.
+            require_approval: Keep the diff only after an interactive human yes.
+                Defaults to True; pass false only for pre-reviewed tasks.
             timeout: Seconds before the delegate is killed.
             skip_permissions: Allow --dangerously-skip-permissions (unattended runs).
         """
@@ -192,6 +195,8 @@ def build_server() -> MCPServer:
             "dry_run": dry_run, "verify_command": verify_command,
             "auto_rollback": auto_rollback, "timeout": timeout,
             "skip_permissions": skip_permissions,
+            **({"require_approval": require_approval}
+               if require_approval is not None else {}),
         })
 
     return server

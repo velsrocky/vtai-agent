@@ -49,6 +49,18 @@ SHELL_MODE_READ = frozenset({"ls", "cat", "head", "tail", "wc", "du", "grep", "f
 # writable_roots.
 SHELL_MODE_WRITE = frozenset({"mkdir", "mv", "cp", "rsync", "tar", "zip", "unzip"})
 
+# Paths that turn an allowlisted binary into an arbitrary code/file executor.
+# Flags that take a path value, including attached forms (-C/etc, -d/etc,
+# --target-directory=/etc). Without this mapping the writable/deny checks
+# miss where the command actually writes.
+SHELL_PATH_FLAGS: dict[str, tuple[str, ...]] = {
+    "tar": ("-C", "--directory"),
+    "unzip": ("-d",),
+    "cp": ("-t", "--target-directory"),
+    "mv": ("-t", "--target-directory"),
+    "grep": ("-f", "--file"),
+}
+
 # Flags that turn an allowlisted binary into an arbitrary code/file executor.
 SHELL_DENY_FLAGS: dict[str, tuple[str, ...]] = {
     "rsync": ("--rsync-path", "--rsh", "-e"),
@@ -166,10 +178,11 @@ class Guardrails:
         found = shutil.which(binary)
         if found is None:
             return self._reject_shell(argv, command, f"'{binary}' not found on PATH")
-        real = str(Path(found).resolve())
-        if not real.startswith(self._trusted):
+        real_p = Path(found).resolve()
+        if not any(real_p.is_relative_to(Path(t)) for t in self._trusted):
             return self._reject_shell(argv, command,
-                                      f"'{binary}' resolves outside trusted dirs: {real}")
+                                      f"'{binary}' resolves outside trusted dirs: {real_p}")
+        real = str(real_p)
 
         for arg in argv[1:]:
             for flag in SHELL_DENY_FLAGS.get(binary, ()):
@@ -179,7 +192,21 @@ class Guardrails:
                     return self._reject_shell(argv, command,
                                               f"flag '{arg}' not permitted for '{binary}'")
 
-        path_args = [a for a in argv[1:] if not a.startswith("-")]
+        tokens = argv[1:]
+        path_args: list[str] = []
+        i = 0
+        while i < len(tokens):
+            a = tokens[i]
+            path_flag_val = self._path_flag_value(binary, a)
+            if path_flag_val is not None:
+                if path_flag_val:
+                    path_args.append(path_flag_val)
+                elif i + 1 < len(tokens):
+                    path_args.append(tokens[i + 1])
+                    i += 1
+            elif not a.startswith("-"):
+                path_args.append(a)
+            i += 1
         try:
             if mode == "write":
                 for a in path_args:
@@ -192,6 +219,22 @@ class Guardrails:
             return self._reject_shell(argv, command, f"argument rejected: {e}")
 
         return ShellDecision([real, *argv[1:]], command, True)
+
+    @staticmethod
+    def _path_flag_value(binary: str, token: str) -> str | None:
+        """If token is a path-taking flag for this binary, return its attached
+        value ('' when it comes as the next argv token); None if it isn't one."""
+        for flag in SHELL_PATH_FLAGS.get(binary, ()):
+            if flag.startswith("--"):
+                if token == flag:
+                    return ""
+                if token.startswith(f"{flag}="):
+                    return token[len(flag) + 1:]
+            elif token == flag:
+                return ""
+            elif token.startswith(flag) and len(token) > len(flag):
+                return token[len(flag):]
+        return None
 
     @staticmethod
     def _anchored(arg: str, base_dir: str | Path | None) -> Path:

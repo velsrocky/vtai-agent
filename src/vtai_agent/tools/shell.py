@@ -49,7 +49,8 @@ class ShellTool(Tool[ShellInput]):
 
     async def run(self, inp: ShellInput, *, run_id: int | None = None) -> ToolResult:
         dry_run = inp.dry_run if inp.dry_run is not None else self.g.dry_run_default
-        decision = self.g.check_shell(inp.command)
+        cwd = Path.cwd()
+        decision = self.g.check_shell(inp.command, base_dir=cwd)
         if not decision.allowed:
             raise GuardrailViolation(decision.reason)
 
@@ -68,6 +69,7 @@ class ShellTool(Tool[ShellInput]):
         try:
             proc = await asyncio.create_subprocess_exec(
                 *decision.argv,
+                cwd=str(cwd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=_child_env(),

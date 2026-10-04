@@ -35,12 +35,24 @@ opencode / Claude Code / pi — and drivable directly via the `vtai` CLI.
 
 ```bash
 uv sync                                  # install
+uv run vtai init                         # create/validate config, dirs, writable roots
 uv run vtai info                         # show config
 uv run vtai tools                        # list tools
 uv run vtai run system_info              # invoke a tool
 uv run vtai run run_shell --params '{"command":"ls ~/Downloads","dry_run":true}'
 scripts/register-mcp.sh                  # register with opencode / claude
 ```
+
+Install into another project as a dependency with
+`uv add git+https://github.com/velsrocky/vtai-agent@v0.5.0`, or pull the
+image with `docker build -t vtai-agent .`.
+
+## HTTP transport
+
+`vtai serve --transport http --port 8765 --token $VT_HTTP_TOKEN` exposes the
+same guarded tools over MCP StreamableHTTP at `/mcp`. The bearer token is
+required when binding anything other than localhost; the server refuses to
+bind externally without one.
 
 ## Development
 
@@ -54,6 +66,22 @@ Config lives in `config/settings.toml`; env overrides use the `VT_` prefix
 with `__` nesting (e.g. `VT_GUARDRAILS__DRY_RUN_DEFAULT=false`). Config is
 validated at startup (`validate_settings`) — a bad `deny_globs` pattern or a
 missing writable root fails fast, not mid-run.
+
+## Orchestrator
+
+`vtai goal` runs a bounded ReAct-style agent loop. Each step the model
+either emits one fenced-JSON tool call (parsed, guarded, executed, result fed
+back) or a final natural-language answer. Bounds enforced every step:
+`max_steps`, kill switch, and `budget_usd_per_run`. The run's dry-run mode is
+authoritative — the model cannot override it — and every tool call is
+persisted as a `Step` row and audit entry. If a paid provider's spend can't
+be determined (no `cost_per_1k_*` config and no native cost), the run fails
+closed rather than reporting free.
+
+We use a text protocol rather than native function-calling on purpose: the
+local Ollama models on this box emit tool calls as raw JSON text even when
+native tool schemas are provided (verified 2026-10-03 with qwen2.5-coder:7b),
+so the text protocol behaves identically across local and cloud providers.
 
 ## Delegate coding
 

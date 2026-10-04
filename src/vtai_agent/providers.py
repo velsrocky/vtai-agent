@@ -82,9 +82,11 @@ def build_model(settings: Settings | None = None) -> Model:
     )
 
 
-def estimate_step_cost(settings: Settings, usage: object) -> float:
-    """USD for one agent step. Explicit `cost_per_1k_*` config wins; else
-    pydantic-ai's native cost table when the model has one; else 0 (free/local)."""
+def estimate_cost(settings: Settings, usage: object) -> float | None:
+    """USD for a run. Explicit `cost_per_1k_*` config wins; else the usage's
+    native cost when the model reports one; else None (unknown) — callers must
+    decide whether an unknown cost on a paid provider is acceptable, never
+    silently treat it as free."""
     provider = getattr(settings, settings.active_provider)
     p_in = getattr(provider, "cost_per_1k_input", None)
     p_out = getattr(provider, "cost_per_1k_output", None)
@@ -92,7 +94,11 @@ def estimate_step_cost(settings: Settings, usage: object) -> float:
         return ((getattr(usage, "input_tokens", 0) or 0) / 1000 * (p_in or 0.0)
                 + (getattr(usage, "output_tokens", 0) or 0) / 1000 * (p_out or 0.0))
     cost = getattr(usage, "cost", None)
-    return float(cost) if cost is not None else 0.0
+    if cost is not None:
+        return float(cost)
+    if settings.active_provider == "local":
+        return 0.0  # local endpoint: free by definition
+    return None
 
 
 def describe_active(settings: Settings | None = None) -> dict:

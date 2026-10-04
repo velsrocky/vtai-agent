@@ -148,3 +148,16 @@ def test_delegate_pi_json_only_output_is_failure(sandbox, monkeypatch):
     )))
     assert not r.ok
     assert "did not apply any changes" in r.summary
+
+
+def test_organize_recursive_does_not_duplicate(sandbox):
+    from vtai_agent.tools.files import OrganizeFilesInput, OrganizeFilesTool
+    docs = sandbox.writable / "Documents"
+    docs.mkdir()
+    (docs / "a.pdf").write_text("x")
+    tool = OrganizeFilesTool(_g(sandbox))
+    r = asyncio.run(tool.run(OrganizeFilesInput(
+        directory=str(sandbox.writable), recursive=True,
+        dry_run=False, confirm_mime=False)))
+    assert r.ok
+    assert sorted(p.name for p in docs.iterdir()) == ["a.pdf"]

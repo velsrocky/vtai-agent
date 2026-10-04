@@ -44,9 +44,48 @@ def get_engine():
     return _engine
 
 
+SCHEMA_VERSION = 1
+
+
+def _current_schema_version() -> int | None:
+    """None = fresh DB (no metadata table yet)."""
+    import sqlalchemy
+
+    with get_engine().connect() as conn:
+        try:
+            row = conn.execute(sqlalchemy.text(
+                "SELECT version FROM vtai_metadata LIMIT 1"
+            )).first()
+        except sqlalchemy.exc.OperationalError:
+            return None
+    return row[0] if row else None
+
+
+def _set_schema_version(v: int) -> None:
+    import sqlalchemy
+
+    with get_engine().begin() as conn:
+        conn.execute(sqlalchemy.text(
+            "CREATE TABLE IF NOT EXISTS vtai_metadata (version INTEGER)"
+        ))
+        conn.execute(sqlalchemy.text("DELETE FROM vtai_metadata"))
+        conn.execute(sqlalchemy.text(
+            "INSERT INTO vtai_metadata (version) VALUES (:v)"
+        ), {"v": v})
+
+
 def init_db() -> None:
     db_path().parent.mkdir(parents=True, exist_ok=True)
+    version = _current_schema_version()
+    if version is not None and version > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"DB schema version {version} is newer than this binary "
+            f"({SCHEMA_VERSION}); upgrade vtai-agent"
+        )
     SQLModel.metadata.create_all(get_engine())
+    if version is None or version < SCHEMA_VERSION:
+        # Future: if version == 1, run v1 -> v2 migration here before stamping.
+        _set_schema_version(SCHEMA_VERSION)
 
 
 @contextmanager
@@ -82,6 +121,9 @@ def finish_run(run_id: int, status: str, cost_usd: float = 0.0,
             run.cost_usd = cost_usd
             if dry_run is not None:
                 run.dry_run = dry_run
+            steps = s.exec(select(Step).where(Step.run_id == run_id)).all()
+            run.steps_done = len(steps)
+            run.steps_total = len(steps)
             s.add(run)
 
 
@@ -100,4 +142,7 @@ def audit(run_id: int | None, action: str, detail: str, allowed: bool = True) ->
 
 def list_runs(limit: int = 20) -> list[Run]:
     with session_scope() as s:
-        return list(s.exec(select(Run).order_by(Run.id.desc()).limit(limit)))
+        runs = list(s.exec(select(Run).order_by(Run.id.desc()).limit(limit)))
+        for r in runs:
+            s.expunge(r)  # detach safely: attributes already loaded
+        return runs

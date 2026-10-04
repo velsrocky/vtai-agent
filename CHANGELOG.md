@@ -1,5 +1,82 @@
 # Changelog
 
+## [Unreleased]
+
+## [0.5.0] - 2026-10-03
+
+### Added
+- **HTTP transport for the MCP server**: `vtai serve --transport http
+  --host --port --token` exposes the same guarded tools over StreamableHTTP.
+  Bearer-token auth via `--token`/`VT_HTTP_TOKEN`; binding a non-localhost
+  address without a token is refused. Localhost without a token remains
+  allowed for single-operator use.
+- **DB schema versioning**: a `vtai_metadata` table records the schema
+  version; `init_db` refuses DBs from newer binaries and leaves a clearly
+  marked place for future migrations.
+- **macOS/Windows CI matrix**: tests now run on ubuntu + macos (blocking)
+  and windows (experimental, continue-on-error).
+- **`vtai runs`**: browse run history (id, started, status, dry/exec,
+  provider, step count, cost, goal) with `--limit`, `--status`, `--grep`.
+  `finish_run` now records step counts on the run row.
+- **Docker hardening**: container now runs as a non-root `vtai` user
+  (uid 1000, `HOME=/home/vtai`), with the writable roots and cargo bin dir
+  pre-created, a `HEALTHCHECK` via `vtai info`, and compose volumes mapped
+  to `/home/vtai` instead of `/root`.
+- **`vtai init`**: writes a starter `config/settings.toml` when missing
+  (`--force` regenerates), ensures data dir and writable roots exist, then
+  validates the result. Prints the next two commands to try.
+
+### Fixed
+- **Budget accounting fails closed.** `providers.estimate_cost` now returns
+  `None` when a paid provider's spend can't be determined (no explicit
+  pricing config and no native cost) instead of silently treating it as
+  free; the orchestrator aborts with a clear message. Local providers
+  explicitly cost 0.
+- **Trusted-binary check uses real path containment.** `str.startswith` on
+  the resolved binary path would accept a sibling prefix like
+  `/usr/bin.evil`; it now requires `is_relative_to` a trusted bin dir.
+- **`run_shell` validates path args against the actual execution cwd.**
+  `check_shell` receives `base_dir=cwd` and the child process is spawned
+  with that cwd, closing the asymmetry with `delegate_coding`.
+
+### Tests
+- 11 new tests: `organize_files` (dry-run, sort, collision rename), delegate
+  rollback-on-failed-verify and keep-on-pass, media job enumeration, and
+  orchestrator loop runs (tool-call round-trip via a scripted FunctionModel,
+  kill switch, unknown-paid-cost fail-closed). 58 tests pass.
+- Attempted a native function-calling rewrite of the orchestrator; verified
+  on 2026-10-03 that the local Ollama models (qwen2.5-coder:7b) emit tool
+  calls as raw text instead of structured calls, so the text protocol stays.
+
+### Fixed (earlier in this cycle)
+- **Shell sandbox: attached path-flag values bypassed writable/deny checks.**
+  `tar -C/etc`, `unzip -d/etc`, `cp --target-directory=/etc`, `mv -t/etc`, and
+  `grep -f /etc/shadow` (attached or `--opt=value` form) passed an option
+  starting with `-` straight past the path checks. `SHELL_PATH_FLAGS` now
+  extracts these values into the checked path args. Verified with live repro
+  before the fix.
+- **`delegate_coding` diff capture missed new files.** `git diff --stat` never
+  reports untracked files, so a delegate that only *added* files looked like
+  "no changes" (which could also trip the pi fail-closed heuristic). The tool
+  now lists untracked files explicitly, and emptiness detection is based on
+  changed tracked files plus untracked ones.
+- **Delegate no longer leaves your index fully staged.** The staging done for
+  snapshot/diff is reverted: the user's original index tree is captured
+  (`git write-tree`) before `git add -A` and restored (`git read-tree`) on
+  every exit path, rollback included.
+- **`delegate_coding` via MCP can set `require_approval`.** The MCP wrapper
+  omitted the parameter, so it always defaulted to `true` and always rolled
+  back (stdio is not a TTY, approval can never happen). The parameter is now
+  exposed; default behavior unchanged.
+- **Recursive `organize_files` no longer "duplicates" already-organized
+  files.** Files already inside their category directory (e.g. from an
+  earlier run) were re-planned and renamed to `name_1.ext`. They are now
+  skipped.
+
+### Tests
+- 2 new regression tests (attached path flags, recursive organize duplicate);
+  50 tests pass.
+
 ## [0.4.0] - 2026-10-02
 
 ### Added

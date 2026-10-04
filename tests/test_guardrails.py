@@ -223,3 +223,15 @@ def test_kill_switch(g, sandbox):
 
 def test_dry_run_default(g):
     assert g.dry_run_default
+
+
+def test_shell_attached_path_flags_are_checked(g, sandbox):
+    w = str(sandbox.writable)
+    # attached values must not bypass the writable/deny checks
+    assert not g.check_shell(f"tar -xf {w}/a.tar -C/etc").allowed
+    assert not g.check_shell(f"unzip -d/etc {w}/a.zip").allowed
+    assert not g.check_shell(f"cp --target-directory=/etc {w}/a {w}/b").allowed
+    assert not g.check_shell(f"mv -t/etc {w}/a {w}/b").allowed
+    # attached value inside writable roots is fine
+    d = g.check_shell(f"tar -xf {w}/a.tar -C{w}/out")
+    assert d.allowed, d.reason

@@ -10,6 +10,71 @@ from .tools import registry
 from .mcp_server import register_tools
 
 
+STARTER_TOML = """\
+active_provider = "local"
+
+[local]
+base_url = "http://localhost:11434/v1"
+model    = "qwen2.5-coder:7b"
+api_key  = "ollama"
+
+[guardrails]
+dry_run_default  = true
+max_steps        = 40
+max_retries      = 3
+budget_usd_per_run = 1.0
+shell_allowlist = [
+  "ls", "cat", "head", "tail", "wc", "du", "df", "free", "grep",
+  "file", "stat", "mkdir", "mv", "cp", "rsync", "tar", "zip", "unzip",
+  "nproc", "uptime", "pytest",
+]
+deny_globs = ["~/.ssh/**", "~/.gnupg/**", "~/.aws/**", "**/.env"]
+
+[guardrails.shell_extra_modes]
+pytest = "write"
+
+[paths]
+writable_roots = ["~/Downloads", "~/Documents/vt-data", "~/.vtaiagent/tmp"]
+data_dir = "~/.vtaiagent"
+"""
+
+
+def cmd_init(args) -> int:
+    """Bootstrap: create config/settings.toml (if missing), writable roots,
+    and the data dir, then validate. Safe to re-run."""
+    from pathlib import Path
+
+    from .config import CONFIG_TOML, Settings, validate_settings
+
+    rc = 0
+    if CONFIG_TOML.exists() and not args.force:
+        print(f"config exists: {CONFIG_TOML} (use --force to regenerate)")
+        try:
+            validate_settings(Settings())
+            print("config validates OK")
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            rc = 1
+    else:
+        CONFIG_TOML.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_TOML.write_text(STARTER_TOML)
+        print(f"wrote starter config: {CONFIG_TOML}")
+
+    for d in ["~/.vtaiagent", "~/.vtaiagent/tmp", "~/Documents/vt-data"]:
+        p = Path(d).expanduser()
+        p.mkdir(parents=True, exist_ok=True)
+        print(f"ensured dir: {p}")
+    Path("~/Downloads").expanduser().mkdir(parents=True, exist_ok=True)
+
+    try:
+        validate_settings(Settings())
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print("\nNext: uv run vtai info && uv run vtai goal --dry-run \"list my Downloads\"")
+    return rc
+
+
 def cmd_info(_args) -> int:
     s = get_settings()
     print(f"VT-AIAgent v{__version__}")
@@ -45,9 +110,44 @@ def cmd_run(args) -> int:
     return 0 if result.ok else 1
 
 
-def cmd_serve(_args) -> int:
+def cmd_serve(args) -> int:
+    import os
+
     from .mcp_server import build_server
-    build_server().run(transport="stdio")
+
+    if args.transport == "stdio":
+        build_server().run(transport="stdio")
+        return 0
+
+    # HTTP transport: expose the same MCP tools over HTTP for app integration.
+    token = args.token or os.environ.get("VT_HTTP_TOKEN", "")
+    if not token and args.host not in ("127.0.0.1", "localhost", "::1"):
+        print("refusing to bind a non-localhost address without "
+              "--token or VT_HTTP_TOKEN", file=sys.stderr)
+        return 2
+
+    import uvicorn
+
+    app = build_server().streamable_http_app(host=args.host)
+
+    if token:
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.responses import JSONResponse
+
+        class _BearerAuth(BaseHTTPMiddleware):
+            async def dispatch(self, request, call_next):
+                auth = request.headers.get("authorization", "")
+                if auth != f"Bearer {token}":
+                    return JSONResponse({"error": "unauthorized"}, status_code=401)
+                return await call_next(request)
+
+        app.add_middleware(_BearerAuth)
+
+    try:
+        db.sweep_orphaned_runs()
+    except Exception:
+        pass
+    uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
 
@@ -93,12 +193,34 @@ def cmd_audit(args) -> int:
     return 0
 
 
+
+def cmd_runs(args) -> int:
+    runs = db.list_runs(limit=args.limit)
+    if args.status:
+        runs = [r for r in runs if r.status == args.status]
+    if args.grep:
+        g = args.grep.lower()
+        runs = [r for r in runs if g in r.goal.lower()]
+    if not runs:
+        print("no runs matched")
+        return 0
+    for r in runs:
+        mode = "dry" if r.dry_run else "exec"
+        started = r.started_at.strftime("%Y-%m-%d %H:%M") if r.started_at else "?"
+        print(f"#{r.id:<4} {started} {r.status:<15} {mode:<4} {r.provider or '-':<9} "
+              f"steps={r.steps_total or r.steps_done:<3} ${r.cost_usd:<7.4f} {r.goal[:60]}")
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="vtai", description="VT-AIAgent CLI")
     sub = p.add_subparsers(dest="command", required=True)
 
     sub.add_parser("info", help="Show provider, paths, and guardrail config").set_defaults(func=cmd_info)
     sub.add_parser("tools", help="List registered tools").set_defaults(func=cmd_tools)
+
+    i = sub.add_parser("init", help="Create/validate config, writable roots, data dir")
+    i.add_argument("--force", action="store_true", help="Overwrite existing config")
+    i.set_defaults(func=cmd_init)
 
     r = sub.add_parser("run", help="Invoke a tool directly (JSON params)")
     r.add_argument("tool", help="Tool name, e.g. organize_files")
@@ -113,6 +235,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Allow real changes (overrides config default)")
     g.set_defaults(func=cmd_goal)
 
+    r2 = sub.add_parser("runs", help="List recent runs")
+    r2.add_argument("--limit", type=int, default=20)
+    r2.add_argument("--status", help="ok | failed | aborted | budget_exceeded | running")
+    r2.add_argument("--grep", help="Case-insensitive substring on goal")
+    r2.set_defaults(func=cmd_runs)
+
     a = sub.add_parser("audit", help="List recent audit-log entries")
     a.add_argument("--limit", type=int, default=50)
     a.add_argument("--action", help="Filter by action (shell, write, delegate, ...)")
@@ -124,7 +252,13 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--grep", help="Case-insensitive substring on detail")
     a.set_defaults(func=cmd_audit)
 
-    sub.add_parser("serve", help="Run the MCP server over stdio").set_defaults(func=cmd_serve)
+    sv = sub.add_parser("serve", help="Run the MCP server (stdio or HTTP)")
+    sv.add_argument("--transport", choices=["stdio", "http"], default="stdio")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--token", default=None,
+                    help="Bearer token (or VT_HTTP_TOKEN). Required for non-localhost binding.")
+    sv.set_defaults(func=cmd_serve)
     return p
 
 

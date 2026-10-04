@@ -33,7 +33,7 @@ deny_globs         = ["~/.ssh/**", "**/.env", ...]
 trusted_bin_dirs   = ["/usr/bin", "/bin", "/usr/local/bin"]
 
 [paths]
-writable_roots = ["~/Downloads", "~/Documents/vt-data", "/tmp/vtaiagent"]
+writable_roots = ["~/Downloads", "~/Documents/vt-data", "~/.vtaiagent/tmp"]
 data_dir       = "~/.vtaiagent"   # sqlite audit db + KILL switch
 ```
 

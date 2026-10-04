@@ -97,6 +97,10 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
         # Snapshot only when we are actually about to execute: `git add -A` plus
         # a stash ref mutate repo state and must never happen in a preview.
         # A failed snapshot means no rollback guarantee, so we refuse to run.
+        # Keep the user's original index tree so it can be restored on exit —
+        # the staging we do for snapshot/diff makes everything look staged.
+        _, orig_index = await self._git(work, "write-tree")
+        orig_index = orig_index.strip()
         rc, _ = await self._git(work, "add", "-A")
         snapshot = ""
         if rc == 0:
@@ -106,6 +110,7 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
         # rc 0 with empty output means the repo was already clean; HEAD is the
         # restore point. Anything else: cannot guarantee rollback.
         if rc != 0:
+            await self._restore_index(work, orig_index)
             raise ToolError("cannot snapshot repo (git add/stash failed); refusing to delegate")
         self.g.ensure_not_killed()
 
@@ -114,11 +119,19 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
         try:
             stdout, stderr, code = await self._run(argv, work, inp.timeout)
         except asyncio.TimeoutError:
-            await self._restore(work, snapshot, run_id, "timeout")
+            await self._restore(work, snapshot, run_id, "timeout", orig_index)
             return ToolResult(ok=False, summary=f"{inp.cli} timed out after {inp.timeout}s; rolled back",
                               detail={**plan, "rolled_back": True, "reason": "timeout"})
 
+        _, status = await self._git(work, "status", "--porcelain")
         _, diff = await self._git(work, "diff", "--stat")
+        # `git diff` never shows untracked files — and a delegate's newest
+        # files are untracked, so list them explicitly, or an add-only change
+        # looks like "no changes".
+        untracked = [ln[3:].strip() for ln in status.splitlines()
+                     if ln.startswith("??")]
+        if untracked:
+            diff += "\n\nUntracked new files:\n" + "\n".join(untracked)
         result = {
             **plan, "returncode": code, "diff": diff[-4000:],
             "stdout": stdout[-4000:], "stderr": stderr[-2000:],
@@ -145,7 +158,7 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
 
         if code != 0:
             if inp.auto_rollback:
-                await self._restore(work, snapshot, run_id, f"exit {code}")
+                await self._restore(work, snapshot, run_id, f"exit {code}", orig_index)
                 result["rolled_back"] = True
                 result["reason"] = f"delegate exited {code}"
             return ToolResult(ok=False, summary=f"{inp.cli} exited {code}", detail=result)
@@ -155,7 +168,7 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
             v_ok, v_out = await self._verify(inp.verify_command, work)
             result["verify"] = {"ok": v_ok, "output": v_out[-2000:]}
             if not v_ok and inp.auto_rollback:
-                await self._restore(work, snapshot, run_id, "verify failed")
+                await self._restore(work, snapshot, run_id, "verify failed", orig_index)
                 result["rolled_back"] = True
                 result["reason"] = "verification failed"
                 return ToolResult(
@@ -169,7 +182,7 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
             approved, note = await self._approve(diff, work)
             result["approval_note"] = note
             if not approved:
-                await self._restore(work, snapshot, run_id, "human rejected")
+                await self._restore(work, snapshot, run_id, "human rejected", orig_index)
                 result["rolled_back"] = True
                 result["reason"] = "human did not approve the diff"
                 return ToolResult(
@@ -181,6 +194,8 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
 
         # `git stash create` never adds to the stash list, so there is nothing
         # to drop; the snapshot ref simply becomes unreachable and is pruned.
+        # Hand the user back their original staging state.
+        await self._restore_index(work, orig_index)
         return ToolResult(
             ok=True,
             summary=f"{inp.cli} completed in {work}; diff captured",
@@ -241,7 +256,14 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
         except (asyncio.TimeoutError, OSError) as e:
             return 124, f"{type(e).__name__}: {e}"
 
-    async def _restore(self, cwd: Path, snapshot: str, run_id: int | None, why: str) -> None:
+    async def _restore_index(self, cwd: Path, orig_index: str) -> None:
+        """Put the user's index back the way it was before we staged for the
+        snapshot. The worktree is untouched; only staging state is restored."""
+        if orig_index:
+            await self._git(cwd, "read-tree", orig_index)
+
+    async def _restore(self, cwd: Path, snapshot: str, run_id: int | None, why: str,
+                       orig_index: str = "") -> None:
         db.audit(run_id, "rollback", f"restoring snapshot ({why})", allowed=True)
         target = snapshot or "HEAD"
         rc, out = await self._git(cwd, "reset", "--hard", target)
@@ -258,6 +280,7 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
         if status.strip():
             db.audit(run_id, "rollback",
                      f"rollback incomplete, still dirty:\n{status[:500]}", allowed=False)
+        await self._restore_index(cwd, orig_index)
 
     async def _verify(self, command: str, cwd: Path) -> tuple[bool, str]:
         decision = self.g.check_shell(command, base_dir=cwd)

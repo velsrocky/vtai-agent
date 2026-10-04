@@ -24,7 +24,7 @@ from .guardrails import (
     reset_current_run,
     set_current_run,
 )
-from .providers import build_model, describe_active, estimate_step_cost
+from .providers import build_model, describe_active, estimate_cost
 from .tools import ToolError, registry
 
 
@@ -162,7 +162,19 @@ class Orchestrator:
 
                 # The model was charged for this step; if that alone blows the
                 # budget, stop before executing anything.
-                spent += estimate_step_cost(self.settings, result.usage)
+                est = estimate_cost(self.settings, result.usage)
+                if est is None and provider != "local":
+                    # Fail closed: a paid step whose spend we cannot verify
+                    # must not be treated as free.
+                    status = "failed"
+                    final_answer = (
+                        f"Cannot determine cost for provider '{provider}'; "
+                        "set cost_per_1k_input/output in config. Refusing to "
+                        "report an unverifiable spend."
+                    )
+                    db.audit(run_id, "abort", final_answer, allowed=True)
+                    break
+                spent += est or 0.0
                 if spent > budget:
                     status = "budget_exceeded"
                     final_answer = (f"Run budget (${budget:.2f}) exceeded at step "

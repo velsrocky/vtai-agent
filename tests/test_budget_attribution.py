@@ -15,7 +15,7 @@ from vtai_agent.config import (
     Settings,
 )
 from vtai_agent.mcp_server import _call, register_tools
-from vtai_agent.models import AuditLog, Run
+from vtai_agent.models import AuditLog, Run, Step
 from vtai_agent.orchestrator import Orchestrator
 from vtai_agent.tools import registry
 
@@ -51,7 +51,7 @@ def _audits(run_id: int) -> list[dict]:
 # ---------- budget enforcement ----------
 def test_budget_exceeded_aborts_run(sandbox):
     orch = Orchestrator(settings=_orch_settings(sandbox, 0.0000000001),
-                        model=TestModel(custom_output_text="done"))
+                        model=TestModel(call_tools=[], custom_output_text="done"))
     res = asyncio.run(orch.run_goal("noop"))
     assert res.status == "budget_exceeded"
     assert res.cost_usd > 0
@@ -61,7 +61,7 @@ def test_budget_exceeded_aborts_run(sandbox):
 
 def test_within_budget_completes_and_records_cost(sandbox):
     orch = Orchestrator(settings=_orch_settings(sandbox, 10.0),
-                        model=TestModel(custom_output_text="all done"))
+                        model=TestModel(call_tools=[], custom_output_text="all done"))
     res = asyncio.run(orch.run_goal("noop"))
     assert res.status == "ok"
     assert res.final_answer == "all done"
@@ -74,14 +74,14 @@ def test_within_budget_completes_and_records_cost(sandbox):
 def test_local_provider_without_pricing_is_free(sandbox):
     s = _orch_settings(sandbox, 10.0)
     object.__setattr__(s, "active_provider", "local")
-    from vtai_agent.providers import estimate_step_cost
+    from vtai_agent.providers import estimate_cost
 
     class U:
         input_tokens = 1000
         output_tokens = 1000
         cost = None
 
-    assert estimate_step_cost(s, U()) == 0.0
+    assert estimate_cost(s, U()) == 0.0
 
 
 # ---------- direct-call attribution ----------
@@ -137,3 +137,61 @@ def test_sweep_marks_orphans_and_leaves_closed_runs(sandbox):
         audits = [a.model_dump() for a in
                   s.exec(select(AuditLog).where(AuditLog.run_id == orphan)).all()]
     assert any(a["action"] == "abort" for a in audits)
+
+
+# ---------- orchestrator loop ----------
+def _scripted_model():
+    """First call returns a fenced JSON tool call, second a final answer."""
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    state = {"n": 0}
+
+    def fn(messages, info):
+        state["n"] += 1
+        if state["n"] == 1:
+            return ModelResponse(parts=[TextPart(
+                '```json\n{"tool": "run_shell", "args": {"command": "uptime", "dry_run": true}}\n```')])
+        return ModelResponse(parts=[TextPart("finished")])
+
+    return FunctionModel(fn)
+
+
+def test_orchestrator_executes_tool_calls(sandbox, tools):
+    orch = Orchestrator(settings=_orch_settings(sandbox, 10.0),
+                        model=_scripted_model())
+    res = asyncio.run(orch.run_goal("tidy up"))
+    assert res.status == "ok"
+    assert res.final_answer == "finished"
+    with db.session_scope() as s:
+        tools_run = [st.tool for st in
+                     s.exec(select(Step).where(Step.run_id == res.run_id)).all()]
+    assert "run_shell" in tools_run
+
+
+def test_orchestrator_kill_switch_aborts(sandbox, tools):
+    (sandbox.settings.paths.data_dir / "KILL").touch()
+    orch = Orchestrator(settings=_orch_settings(sandbox, 10.0),
+                        model=TestModel(call_tools=[], custom_output_text="done"))
+    res = asyncio.run(orch.run_goal("noop"))
+    assert res.status == "aborted"
+    assert "kill switch" in res.final_answer.lower()
+
+
+def test_orchestrator_unknown_paid_cost_fails_closed(sandbox, tools):
+    s = Settings(
+        active_provider="openai",
+        openai=ProviderOpenAI(model="test"),  # no pricing configured
+        guardrails=GuardrailsConfig(
+            dry_run_default=True, max_steps=5, max_retries=1,
+            budget_usd_per_run=10.0,
+            deny_globs=sandbox.cfg.deny_globs,
+            trusted_bin_dirs=sandbox.cfg.trusted_bin_dirs,
+        ),
+        paths=sandbox.paths,
+    )
+    orch = Orchestrator(settings=s,
+                        model=TestModel(call_tools=[], custom_output_text="done"))
+    res = asyncio.run(orch.run_goal("noop"))
+    assert res.status == "failed"
+    assert "cost" in res.final_answer.lower()

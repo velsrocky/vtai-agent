@@ -117,6 +117,10 @@ class OrganizeFilesTool(Tool[OrganizeFilesInput]):
                 category = self._category_from_mime(mime_cache.get(str(f), ""))
             if category is None:
                 category = "Other"
+            # Already sitting in a category directory (e.g. from an earlier
+            # organize)? Planning a move for it just renames it to _1.
+            if f.parent.name == category and f.parent != src:
+                continue
             dest_dir = src / category
             plan.append(PlannedMove(
                 source=str(f), destination=str(dest_dir / f.name), category=category,
