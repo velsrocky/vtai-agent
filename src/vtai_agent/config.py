@@ -9,7 +9,24 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
-CONFIG_TOML = Path(__file__).resolve().parents[2] / "config" / "settings.toml"
+import os
+
+
+def _find_config_toml() -> Path:
+    """Resolution order: $VT_CONFIG, the repo-adjacent config (editable
+    installs / development), then the user-level config written by
+    `vtai init`. A global `uv tool` install has no repo to be adjacent
+    to, so the user-level file is what it finds."""
+    env = os.environ.get("VT_CONFIG")
+    if env:
+        return Path(env).expanduser()
+    repo = Path(__file__).resolve().parents[2] / "config" / "settings.toml"
+    if repo.exists():
+        return repo
+    return Path.home() / ".vtaiagent" / "settings.toml"
+
+
+CONFIG_TOML = _find_config_toml()
 
 
 class _Priced(BaseModel):

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-04
+
+### Fixed
+- **Global installs find their config.** `CONFIG_TOML` now resolves
+  `$VT_CONFIG` → repo-adjacent file → `~/.vtaiagent/settings.toml`, so a
+  `uv tool`-installed `vtai` no longer falls back to defaults (empty
+  allowlist, wrong model) outside the repo.
+- **Version comes from package metadata** (single source: pyproject), so
+  `vtai info` can't drift from the installed release again.
+
 ## [0.5.0] - 2026-10-03
 
 ### Added
