@@ -136,6 +136,8 @@ cp scripts/agent-listen scripts/agent-speak ~/.local/bin/
 chmod +x ~/.local/bin/agent-listen ~/.local/bin/agent-speak
 ```
 
+These are copies — re-run the `cp` after pulling script updates.
+
 Cross-platform notes (verified on macOS 27/ARM, 2026-10-12):
 
 - `arecord` is used for recording on Linux; elsewhere the helpers fall back
