@@ -63,7 +63,11 @@ uv run ruff check src/ tests/
 ```
 
 Config lives in `config/settings.toml`; env overrides use the `VT_` prefix
-with `__` nesting (e.g. `VT_GUARDRAILS__DRY_RUN_DEFAULT=false`). Config is
+with `__` nesting (e.g. `VT_GUARDRAILS__DRY_RUN_DEFAULT=false`). On a Mac
+without Ollama, point the local provider at Lemonade instead via a
+gitignored machine-local `.env`:
+`VT_LOCAL__BASE_URL=http://localhost:13305/api/v1` plus
+`VT_LOCAL__MODEL=<a pulled chat model>`. Config is
 validated at startup (`validate_settings`) — a bad `deny_globs` pattern or a
 missing writable root fails fast, not mid-run.
 
