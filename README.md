@@ -144,8 +144,9 @@ Cross-platform notes (verified on macOS 27/ARM, 2026-10-12):
   `--seconds N`.
 - macOS mic selection: avfoundation device indexes vary per machine — list
   them with `ffmpeg -f avfoundation -list_devices true -i ""` and override
-  via `AGENT_LISTEN_FF_INPUT` (default `-f avfoundation -i :0`). Note the
-  Mac mini has no built-in microphone; an external/USB device must be present.
+  via `AGENT_LISTEN_FF_INPUT` (default audio-only `-f avfoundation -i ":0"`).
+  Note the Mac mini has no built-in microphone; an external/USB device must
+  be present, otherwise recording yields silence (exit 6, no speech).
 - Playback tries `ffplay` → `afplay` (macOS) → `mpg123` → `aplay` in order.
 - The ALSA mic-level fix and `vtai-audio-fix` systemd unit below are
   Linux-specific; Windows and macOS handle this in System Settings.

@@ -78,12 +78,24 @@ elif command -v arecord >/dev/null 2>&1; then
 elif command -v ffmpeg >/dev/null 2>&1; then
   # AGENT_LISTEN_FF_INPUT overrides the capture input (device indexes vary
   # per machine; list them with `ffmpeg -f avfoundation -list_devices true -i ""`).
+  # Audio-only on macOS (":0" = first audio device, no video). An array holds
+  # the input spec so no quote juggling is needed on expansion.
   case "$(uname -s)" in
-    Darwin) FF_IN="${AGENT_LISTEN_FF_INPUT:--f avfoundation -i :0}" ;;
-    MINGW*|MSYS*|CYGWIN*) FF_IN="${AGENT_LISTEN_FF_INPUT:--f dshow -i audio=Microphone}" ;;
-    *) FF_IN="${AGENT_LISTEN_FF_INPUT:--f pulse -i default}" ;;
+    Darwin) FF_IN=(-f avfoundation -i ":0") ;;
+    MINGW*|MSYS*|CYGWIN*) FF_IN=(-f dshow -i audio=Microphone) ;;
+    *) FF_IN=(-f pulse -i default) ;;
   esac
-  ffmpeg -hide_banner -loglevel error $FF_IN -t "$SECONDS_TO_RECORD" -ar 16000 -ac 1 -f wav pipe:1 | tee "$WAV" | python3 -u -c "$METER" "$SECONDS_TO_RECORD" >&2 && record_ok=1 || true
+  if [ -n "${AGENT_LISTEN_FF_INPUT:-}" ]; then
+    # Word-split is intentional here: the override is a plain flag string.
+    # shellcheck disable=SC2206
+    FF_IN=($AGENT_LISTEN_FF_INPUT)
+  fi
+  # The level meter exits after N seconds, closing the pipe while ffmpeg is
+  # still writing: under `set -o pipefail` that reads as failure, so success
+  # is judged by the captured file, not the pipeline status.
+  ffmpeg -hide_banner -nostdin -loglevel error "${FF_IN[@]}" -t "$SECONDS_TO_RECORD" -ar 16000 -ac 1 -f wav pipe:1 2>/dev/null \
+    | tee "$WAV" | python3 -u -c "$METER" "$SECONDS_TO_RECORD" >&2 || true
+  [ -s "$WAV" ] && record_ok=1
 else
   echo "agent-listen: need arecord or ffmpeg" >&2; exit 1
 fi
