@@ -41,8 +41,8 @@ def reset_current_run(token: contextvars.Token) -> None:
 
 TRUSTED_BIN_DIRS: tuple[str, ...] = ("/usr/bin", "/bin", "/usr/local/bin")
 
-# Commands that take no interesting arguments.
-SHELL_MODE_NONE = frozenset({"df", "free", "nproc", "uptime", "rocm-smi", "vulkaninfo"})
+# Commands that take no interesting arguments (read-only system info).
+SHELL_MODE_NONE = frozenset({"df", "free", "nproc", "uptime", "rocm-smi", "vulkaninfo", "vm_stat"})
 # Commands whose path arguments are read-only: deny-globs still apply.
 SHELL_MODE_READ = frozenset({"ls", "cat", "head", "tail", "wc", "du", "grep", "file", "stat"})
 # Commands that mutate the filesystem: every non-flag argument must be inside

@@ -10,7 +10,29 @@ from .tools import registry
 from .mcp_server import register_tools
 
 
-STARTER_TOML = """\
+STARTER_BINS = [
+    "ls", "cat", "head", "tail", "wc", "du", "df", "free", "grep",
+    "file", "stat", "mkdir", "mv", "cp", "rsync", "tar", "zip", "unzip",
+    "nproc", "uptime", "pytest",
+]
+# free/nproc are Linux-only; macOS gets vm_stat instead (policy in
+# guardrails.py). Missing binaries deny harmlessly, but a starter config
+# should only list binaries that can actually run on the new machine.
+STARTER_BINS_LINUX_ONLY = {"free", "nproc"}
+STARTER_BINS_MAC_ONLY = ["vm_stat"]
+
+
+def _starter_allowlist() -> list[str]:
+    bins = [b for b in STARTER_BINS if b not in STARTER_BINS_LINUX_ONLY] \
+        if sys.platform == "darwin" else list(STARTER_BINS)
+    if sys.platform == "darwin":
+        bins += STARTER_BINS_MAC_ONLY
+    return bins
+
+
+def _starter_toml() -> str:
+    allow = ",\n  ".join(f'"{b}"' for b in _starter_allowlist())
+    return f"""\
 active_provider = "local"
 
 [local]
@@ -24,9 +46,7 @@ max_steps        = 40
 max_retries      = 3
 budget_usd_per_run = 1.0
 shell_allowlist = [
-  "ls", "cat", "head", "tail", "wc", "du", "df", "free", "grep",
-  "file", "stat", "mkdir", "mv", "cp", "rsync", "tar", "zip", "unzip",
-  "nproc", "uptime", "pytest",
+  {allow},
 ]
 deny_globs = ["~/.ssh/**", "~/.gnupg/**", "~/.aws/**", "**/.env"]
 
@@ -37,6 +57,9 @@ pytest = "write"
 writable_roots = ["~/Downloads", "~/Documents/vt-data", "~/.vtaiagent/tmp"]
 data_dir = "~/.vtaiagent"
 """
+
+
+STARTER_TOML = _starter_toml()
 
 
 def cmd_init(args) -> int:

@@ -7,6 +7,7 @@ clobber originals. Falls back to software if the VAAPI device is unavailable.
 """
 
 import asyncio
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -50,6 +51,8 @@ class MediaTranscodeTool(Tool[TranscodeMediaInput]):
         self.g.check_writable(root)  # output subdir lives inside root
 
         codec = inp.codec or self.cfg.video_codec
+        if codec.endswith("_vaapi") and not self._vaapi_available():
+            codec = "libx264"  # no VAAPI off Linux: label the real encoder
         out_name = self.cfg.output_dir_name
         candidates = list(root.rglob("*")) if inp.recursive else list(root.iterdir())
         jobs: list[dict] = []
@@ -105,6 +108,8 @@ class MediaTranscodeTool(Tool[TranscodeMediaInput]):
         )
 
     def _vaapi_available(self) -> bool:
+        if sys.platform != "linux":
+            return False  # VAAPI render nodes are Linux-only
         dev = Path(self.cfg.vaapi_device)
         return dev.exists() and self.cfg.video_codec.endswith("_vaapi")
 

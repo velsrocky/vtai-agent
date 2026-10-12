@@ -9,7 +9,7 @@ fi
 if [ "${#TEXT}" -gt 4000 ]; then
   echo "agent-speak: input too long (${#TEXT} chars, max 4000)" >&2; exit 2
 fi
-TMP="$(mktemp --suffix=.mp3)"
+TMP="$(mktemp "${TMPDIR:-/tmp}/agent-speak.XXXXXX.mp3")"
 trap 'rm -f "$TMP"' EXIT
 ok=0
 for attempt in 1 2 3; do

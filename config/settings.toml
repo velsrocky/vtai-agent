@@ -39,10 +39,12 @@ denial_window_seconds = 300
 # find/git/systemctl/journalctl/ffmpeg/magick/convert were removed: each can
 # execute arbitrary code or write outside the sandbox. Use the dedicated tools
 # (backup_sync, delegate_coding, transcode_media) for those workflows.
+# free/nproc/rocm-smi/vulkaninfo are Linux-only, vm_stat is macOS-only;
+# missing binaries simply deny with "not found on PATH" elsewhere.
 shell_allowlist = [
   "ls", "cat", "head", "tail", "wc", "du", "df", "free", "grep",
   "file", "stat", "mkdir", "mv", "cp", "rsync", "tar", "zip", "unzip",
-  "rocm-smi", "vulkaninfo", "nproc", "uptime", "pytest",
+  "rocm-smi", "vulkaninfo", "nproc", "uptime", "pytest", "vm_stat",
 ]
 # Paths the agent may never touch, even inside writable_roots
 deny_globs = [
@@ -53,8 +55,10 @@ deny_globs = [
 # of these prefixes. This box has Rust coreutils installed by cargo, so
 # ls/cat/cp/mkdir resolve into /usr/lib/cargo/bin/coreutils — same trust class
 # as /usr/local/bin (root-installed package dir). Remove if you drop it.
+# /opt/homebrew/bin is for macOS (Homebrew ffmpeg etc.); missing entries are
+# ignored on machines where they don't exist.
 trusted_bin_dirs = [
-  "/usr/bin", "/bin", "/usr/local/bin", "/usr/lib/cargo/bin",
+  "/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin", "/usr/lib/cargo/bin",
 ]
 
 # Extend the built-in fail-closed shell policy for allowlisted binaries not
@@ -74,6 +78,8 @@ data_dir = "~/.vtaiagent"   # sqlite db, audit log, screenshots
 [media]
 # VAAPI render node for GPU transcoding (card1 = RX 6700 XT dGPU).
 # Falls back to software encoding if the device is missing or fails.
+# macOS/Windows have no VAAPI: the code default is libx264 there (see
+# config.py); an explicit codec here still overrides per machine.
 vaapi_device = "/dev/dri/renderD128"
 video_codec  = "h264_vaapi"   # h264_vaapi | hevc_vaapi | av1_vaapi | libx264 ...
 container    = "mkv"

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+- **macOS compatibility.** `system_info` no longer crashes without `/proc`
+  (memory via `sysctl`/`vm_stat`, disks via `/`, `$HOME`, `/Volumes/*`,
+  Metal GPU note); `agent-listen`/`agent-speak` use portable `mktemp`;
+  `trusted_bin_dirs` validation tolerates entries missing on this machine
+  and the shipped config includes `/opt/homebrew/bin`. `transcode_media`
+  defaults to `libx264` off Linux and labels the effective encoder;
+  `disk_audit` measures macOS cache locations; `vm_stat` has a `run_shell`
+  policy and fresh mac installs get an OS-aware starter allowlist.
+
 ## [0.5.2] - 2026-10-04
 
 ### Added

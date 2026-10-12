@@ -14,7 +14,7 @@ if ! [[ "$SECONDS_TO_RECORD" =~ ^[0-9]+$ ]] || [ "$SECONDS_TO_RECORD" -lt 1 ] ||
 fi
 BASE="${LEMONADE_BASE_URL:-http://localhost:13305}"
 STT_MODEL="${LEMONADE_STT_MODEL:-Whisper-Tiny}"
-WAV="$(mktemp --suffix=.wav)"
+WAV="$(mktemp "${TMPDIR:-/tmp}/agent-listen.XXXXXX.wav")"
 trap 'rm -f "$WAV"' EXIT
 METER='import sys,time,struct,math
 buf=sys.stdin.buffer

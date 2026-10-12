@@ -81,9 +81,15 @@ class Guardrails(BaseModel):
     )
 
 
+def _default_video_codec() -> str:
+    if sys.platform in ("darwin", "win32"):
+        return "libx264"  # no VAAPI render nodes off Linux; see MediaTranscodeTool
+    return "h264_vaapi"
+
+
 class Media(BaseModel):
     vaapi_device: str = "/dev/dri/renderD128"
-    video_codec: str = "h264_vaapi"
+    video_codec: str = Field(default_factory=_default_video_codec)
     container: str = "mkv"
     output_dir_name: str = "transcoded"
 
@@ -174,9 +180,15 @@ def validate_settings(s: Settings) -> None:
             fnmatch.translate(pat)
         except re.error:
             errs.append(f"deny_globs pattern does not compile: {pat!r}")
-    for d in g.trusted_bin_dirs:
-        if not Path(d).is_dir():
-            errs.append(f"trusted_bin_dirs entry is not a directory: {d}")
+    # Portable configs may list dirs from several OSes (e.g. /opt/homebrew/bin
+    # on macOS, /usr/lib/cargo/bin on Linux). Entries that don't exist here
+    # simply never match a resolved binary; only fail when *none* exist.
+    existing_trusted = [d for d in g.trusted_bin_dirs if Path(d).is_dir()]
+    if not existing_trusted:
+        errs.append(
+            "trusted_bin_dirs has no existing directory on this machine: "
+            f"{g.trusted_bin_dirs}"
+        )
     for r in s.paths.writable_roots:
         if not Path(r).exists():
             errs.append(f"writable_roots entry does not exist: {r}")

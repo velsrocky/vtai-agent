@@ -19,6 +19,8 @@ CACHE_DIRS = [
     "~/.npm", "~/.nuget", "~/.gradle", "~/.m2", "~/.cargo/registry",
     "~/.local/share/containers", "~/.mozilla", "~/.config/google-chrome",
     "~/.config/opencode", "~/.ollama/models", "~/models",
+    # macOS locations (entries missing on this machine are skipped)
+    "~/Library/Caches", "~/Library/Logs", "/Library/Caches", "~/.Trash",
 ]
 
 
