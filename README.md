@@ -136,20 +136,30 @@ cp scripts/agent-listen scripts/agent-speak ~/.local/bin/
 chmod +x ~/.local/bin/agent-listen ~/.local/bin/agent-speak
 ```
 
-Cross-platform notes:
+Cross-platform notes (verified on macOS 27/ARM, 2026-10-12):
 
 - `arecord` is used for recording on Linux; elsewhere the helpers fall back
   to `ffmpeg` (`-f pulse` / `avfoundation`), so macOS and Windows work too.
 - `--vad` currently requires Linux `arecord`; on other platforms use
   `--seconds N`.
+- macOS mic selection: avfoundation device indexes vary per machine — list
+  them with `ffmpeg -f avfoundation -list_devices true -i ""` and override
+  via `AGENT_LISTEN_FF_INPUT` (default `-f avfoundation -i :0`). Note the
+  Mac mini has no built-in microphone; an external/USB device must be present.
 - Playback tries `ffplay` → `afplay` (macOS) → `mpg123` → `aplay` in order.
 - The ALSA mic-level fix and `vtai-audio-fix` systemd unit below are
   Linux-specific; Windows and macOS handle this in System Settings.
 - `guardrails.trusted_bin_dirs` defaults per OS (`C:\Windows\System32`,
   `/usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin`, and the Linux set);
-  override in `settings.toml` for custom installs.
-- `transcode_media`'s VAAPI path is Linux-only; on macOS/Windows pass
-  `"codec": "libx264"` and omit the render-node device.
+  entries missing on the current machine are ignored (validation only fails
+  when none exist), so one config can list both Linux and macOS paths.
+- `system_info` is portable: memory via `sysctl`/`vm_stat` and disks via
+  `/`, `$HOME`, `/Volumes/*` on macOS (Metal GPU note; no `rocm-smi` there).
+- `transcode_media` defaults to `libx264` off Linux (VAAPI is Linux-only);
+  an explicit `"codec"` still overrides.
+- `disk_audit` also measures `~/Library/Caches`, `~/Library/Logs`,
+  `/Library/Caches`, and `~/.Trash` on macOS; fresh mac installs get
+  `vm_stat` (instead of Linux-only `free`/`nproc`) in the starter allowlist.
 
 ### Troubleshooting
 
