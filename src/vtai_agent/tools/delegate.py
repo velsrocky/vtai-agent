@@ -218,7 +218,9 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
 
     def _build_argv(self, binary: str, inp: DelegateCodingInput) -> list[str]:
         if binary == "opencode":
-            return ["opencode", "run", "--dir", inp.working_dir, inp.prompt]
+            # opencode v2 `run` takes the message positionally and operates in
+            # cwd (set by _run); it has no --dir flag.
+            return ["opencode", "run", inp.prompt]
         if binary == "claude":
             args = ["claude", "-p", inp.prompt]
             if inp.skip_permissions:

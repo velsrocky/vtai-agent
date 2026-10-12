@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Fixed
+- **auto_mode/delegate opencode argv**: dropped the `--dir` flag `opencode
+  run` does not accept (it printed help and exited non-zero); the working
+  directory comes from the subprocess cwd. Non-zero CLI exits now raise
+  instead of returning help text as a "reply", and a dead judge model aborts
+  with `ok=False` instead of reporting unverified success.
 - **macOS compatibility.** `system_info` no longer crashes without `/proc`
   (memory via `sysctl`/`vm_stat`, disks via `/`, `$HOME`, `/Volumes/*`,
   Metal GPU note); `agent-listen`/`agent-speak` use portable `mktemp`;

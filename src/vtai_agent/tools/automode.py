@@ -85,6 +85,15 @@ class AutoModeTool(Tool[AutoModeInput]):
             history.append({"iteration": i, "prompt": prompt[:2000],
                             "reply": last_reply[-2000:], "verdict": verdict,
                             "critique": critique[:1000]})
+            if verdict == "error":
+                # The judge itself is down: no reply can be verified, so stop
+                # instead of looping blindly or declaring success.
+                return ToolResult(
+                    ok=False,
+                    summary=f"cannot verify goal: {critique}",
+                    detail={**plan, "iterations": i, "history": history,
+                            "final_answer": last_reply[-4000:]},
+                )
             if verdict == "ok":
                 return ToolResult(
                     ok=True,
@@ -109,7 +118,10 @@ class AutoModeTool(Tool[AutoModeInput]):
     async def _ask_cli(self, binary: str, cli: str, prompt: str, cwd: Path,
                        timeout: float) -> str:
         if cli == "opencode":
-            argv = ["opencode", "run", "--dir", str(cwd), prompt]
+            # opencode v2 `run` takes the message positionally and operates in
+            # cwd (already set below); it has no --dir flag — an unknown flag
+            # makes it print help and exit non-zero.
+            argv = ["opencode", "run", prompt]
         elif cli == "claude":
             argv = ["claude", "-p", prompt]
         else:
@@ -125,9 +137,13 @@ class AutoModeTool(Tool[AutoModeInput]):
             await proc.communicate()
             raise
         text = out.decode(errors="replace")
-        if proc.returncode != 0 and not text.strip():
+        err = err.decode(errors="replace")
+        if proc.returncode != 0:
+            # A non-zero exit means the CLI did not do the work — even when it
+            # printed something (e.g. opencode prints help on bad flags).
+            # Returning that text as a "reply" would let the judge approve it.
             raise ToolError(f"{cli} exited {proc.returncode}: "
-                            f"{err.decode(errors='replace')[-500:]}")
+                            f"{(text or err)[-500:]}")
         return text
 
     async def _judge(self, goal: str, reply: str) -> tuple[str, str]:
@@ -139,9 +155,10 @@ class AutoModeTool(Tool[AutoModeInput]):
         try:
             result = await agent.run(f"GOAL:\n{goal}\n\nREPLY:\n{reply[-4000:]}")
         except Exception as e:
-            # Without a working judge the loop cannot verify; fail closed by
-            # reporting the first reply as-is rather than looping blindly.
-            return "ok", f"judge unavailable: {type(e).__name__}: {e}"
+            # Without a working judge no reply can be verified. Fail closed:
+            # the "error" verdict makes run() stop with ok=False instead of
+            # declaring an unchecked reply satisfactory.
+            return "error", f"judge unavailable: {type(e).__name__}: {e}"
         text = str(result.output).strip()
         if text.upper().startswith("OK"):
             return "ok", ""
