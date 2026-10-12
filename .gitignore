@@ -16,3 +16,6 @@ build/
 *.db
 *.db-journal
 .vtai-agent-audit.log
+
+# Local MCP registration (absolute paths, per machine)
+opencode.json
