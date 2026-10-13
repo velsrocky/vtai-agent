@@ -1,6 +1,7 @@
 """auto_mode/delegate safety: bad CLI invocations and dead judges fail closed."""
 
 import asyncio
+import shutil
 
 import pytest
 
@@ -91,6 +92,8 @@ def test_judge_unavailable_fails_closed(sandbox, monkeypatch):
         return "a plausible but unverified answer"
 
     monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
+    # run() checks shutil.which before _ask_cli; CI runners have no opencode.
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/opencode")
     # _judge does `from pydantic_ai import Agent` at call time, so patch it
     # at the source module, not on automode.
     monkeypatch.setattr("pydantic_ai.Agent", _DeadJudge)
