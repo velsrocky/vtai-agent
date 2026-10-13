@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-13
+
 ### Fixed
 - **auto_mode/delegate opencode argv**: dropped the `--dir` flag `opencode
   run` does not accept (it printed help and exited non-zero); the working
@@ -16,6 +18,10 @@
   defaults to `libx264` off Linux and labels the effective encoder;
   `disk_audit` measures macOS cache locations; `vm_stat` has a `run_shell`
   policy and fresh mac installs get an OS-aware starter allowlist.
+- **`disk_info` skips pseudo filesystems.** The Linux path only filtered 7
+  fstypes, so zero-size pseudo-mounts (`devpts`, `cgroup2`, `nsfs`,
+  `fuse.*`, …) broke the `total_gb > 0` invariant. Expanded skip list plus
+  a `total == 0` guard; only real disks are reported.
 
 ## [0.5.2] - 2026-10-04
 
