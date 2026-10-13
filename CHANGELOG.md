@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-10-13
+
+### Fixed
+- **CI: judge-unavailable test mocks `shutil.which`.** `AutoModeTool.run`
+  checks the CLI binary before `_ask_cli`, so the test raised
+  `FileNotFoundError` on runners without `opencode`. Now hermetic.
+
 ## [0.5.3] - 2026-10-13
 
 ### Fixed
