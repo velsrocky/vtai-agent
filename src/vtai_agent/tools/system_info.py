@@ -121,11 +121,19 @@ def disk_info() -> list[dict]:
         if len(parts) < 3:
             continue
         dev, mp, fst = parts[0], parts[1], parts[2]
-        if fst in {"tmpfs", "proc", "sysfs", "cgroup", "devtmpfs", "squashfs", "overlay"}:
+        if fst in {"tmpfs", "proc", "sysfs", "cgroup", "cgroup2", "devtmpfs", "squashfs", "overlay",
+                   "devpts", "securityfs", "pstore", "efivarfs", "bpf", "autofs", "tracefs",
+                   "mqueue", "debugfs", "hugetlbfs", "configfs", "fusectl", "nsfs",
+                   "binfmt_misc", "fuse.portal", "fuse.gvfsd-fuse"} or fst.startswith("fuse."):
             continue
         if not mp.startswith(("/",)):
             continue
-        st = shutil.disk_usage(mp if Path(mp).is_dir() else "/")
+        try:
+            st = shutil.disk_usage(mp if Path(mp).is_dir() else "/")
+        except OSError:
+            continue
+        if st.total == 0:
+            continue
         out.append({
             "mount": mp, "fstype": fst, "device": dev,
             "total_gb": st.total / 1024 ** 3,
