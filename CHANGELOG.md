@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Added
+- **`vtai voice-sync`**: installs `agent-listen`/`agent-speak` from the
+  versioned `scripts/` dir to `~/.local/bin` (`--dest` overrides),
+  reporting `installed`/`updated`/`unchanged` per helper with checksums.
+  `voice-sync --check` reports drift (exit 1) without copying;
+  `VTAI_SCRIPTS_DIR` overrides the source checkout.
+
+### Fixed
+- **CI targets Linux + macOS only.** The Windows job (experimental,
+  `continue-on-error`) was permanently red — the shell sandbox and test
+  suite are Unix-shaped. Removed from the matrix; Windows stays
+  best-effort/untested (README notes this). Blocking signal is green.
+- **Judge robustness (`auto_mode`).** A `build_model` failure used to crash
+  out of `_judge`; it now returns the fail-closed `error` verdict. Judge
+  calls are bounded (`120s` timeout) and retried once before giving up, so
+  one flaky inference or hung local model no longer aborts the loop or
+  hangs it.
+- **`disk_info` is property-based.** Replaced the 20-entry fstype skip list
+  (which rotted on every new pseudo-fs) with measurement: skip RAM/merged
+  images by storage semantics (`tmpfs`, `devtmpfs`, `overlay`, `squashfs`
+  only), then drop sub-MB virtual filesystems, zero-size pseudo-mounts,
+  and exact `(total, free)` namespace duplicates.
+
+### Changed
+- Dependency refresh via `uv lock --upgrade` (sqlmodel, starlette,
+  uvicorn, pydantic-evals/graph, ruff, and transitive pins).
+
+### Tests
+- 6 new tests (80 pass): voice-sync install/update/check/exit-code, judge
+  retry-on-transient and build-failure-fails-closed. Hermeticity audit:
+  no remaining PATH/env-dependent tests (delegate/automode CLI tests skip
+  or mock `shutil.which`; `rsync`/`git` tests skip when absent).
+
 ## [0.5.4] - 2026-10-13
 
 ### Fixed

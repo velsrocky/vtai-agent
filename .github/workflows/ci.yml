@@ -10,15 +10,10 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        experimental: [false]
-        include:
-          - os: windows-latest
-            experimental: true  # best-effort: shell paths/allowlists are Unix-shaped
     steps:
       - uses: actions/checkout@v4
 

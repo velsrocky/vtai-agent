@@ -136,13 +136,20 @@ point elsewhere.
 The scripts are versioned in `scripts/`; install them with:
 
 ```bash
-cp scripts/agent-listen scripts/agent-speak ~/.local/bin/
-chmod +x ~/.local/bin/agent-listen ~/.local/bin/agent-speak
+uv run vtai voice-sync
 ```
 
-These are copies — re-run the `cp` after pulling script updates.
+`voice-sync` copies both helpers to `~/.local/bin` (override with `--dest`),
+marks them executable, and reports `installed` / `updated` / `unchanged` per
+file. `vtai voice-sync --check` only reports drift (exit 1 when out of sync)
+— re-run without `--check` after pulling script updates. Set
+`VTAI_SCRIPTS_DIR` to sync from a different checkout.
 
 Cross-platform notes (verified on macOS 27/ARM, 2026-10-12):
+
+> **Supported: Linux + macOS** (both blocking in CI). Windows keeps partial
+> accommodations (`trusted_bin_dirs`, codec default) but is untested in CI
+> and best-effort — the shell sandbox and test suite are Unix-shaped.
 
 - `arecord` is used for recording on Linux; elsewhere the helpers fall back
   to `ffmpeg` (`-f pulse` / `avfoundation`), so macOS and Windows work too.

@@ -26,6 +26,12 @@ exactly: OK. Otherwise answer: INSUFFICIENT: <one-paragraph critique of what
 is missing, wrong, or unverified>.
 """
 
+# Judge call policy: local models hang or flake, so bound each attempt and
+# retry once before failing closed. Both are deliberately small: an
+# unverifiable reply must stop the loop fast, not burn max_iterations.
+_JUDGE_ATTEMPTS = 2
+_JUDGE_TIMEOUT = 120.0
+
 
 class AutoModeInput(BaseModel):
     goal: str = Field(description="The full goal or question to satisfy.")
@@ -150,17 +156,28 @@ class AutoModeTool(Tool[AutoModeInput]):
         from pydantic_ai import Agent
 
         from ..providers import build_model
-        model = self._model if self._model is not None else build_model(self.settings)
-        agent = Agent(model=model, system_prompt=_JUDGE_SYSTEM, retries=1)
         try:
-            result = await agent.run(f"GOAL:\n{goal}\n\nREPLY:\n{reply[-4000:]}")
+            model = self._model if self._model is not None else build_model(self.settings)
+            agent = Agent(model=model, system_prompt=_JUDGE_SYSTEM, retries=1)
         except Exception as e:
-            # Without a working judge no reply can be verified. Fail closed:
-            # the "error" verdict makes run() stop with ok=False instead of
-            # declaring an unchecked reply satisfactory.
+            # Misconfigured/unavailable provider: no reply can be verified.
             return "error", f"judge unavailable: {type(e).__name__}: {e}"
-        text = str(result.output).strip()
-        if text.upper().startswith("OK"):
-            return "ok", ""
-        critique = text.split(":", 1)[1].strip() if ":" in text else text
-        return "insufficient", critique or "reply did not satisfy the goal"
+        last_error: Exception | None = None
+        for _ in range(_JUDGE_ATTEMPTS):
+            try:
+                result = await asyncio.wait_for(
+                    agent.run(f"GOAL:\n{goal}\n\nREPLY:\n{reply[-4000:]}"),
+                    timeout=_JUDGE_TIMEOUT,
+                )
+            except Exception as e:
+                # Transient inference failure or hung local model: retry
+                # before giving up on verification.
+                last_error = e
+                continue
+            text = str(result.output).strip()
+            if text.upper().startswith("OK"):
+                return "ok", ""
+            critique = text.split(":", 1)[1].strip() if ":" in text else text
+            return "insufficient", critique or "reply did not satisfy the goal"
+        assert last_error is not None
+        return "error", f"judge unavailable: {type(last_error).__name__}: {last_error}"

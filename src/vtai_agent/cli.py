@@ -1,13 +1,85 @@
 import argparse
 import asyncio
+import hashlib
 import json
+import os
+import shutil
 import sys
+from pathlib import Path
 
 from . import __version__, db
 from .config import get_settings
 from .providers import describe_active
 from .tools import registry
 from .mcp_server import register_tools
+
+VOICE_HELPERS = ("agent-listen", "agent-speak")
+
+
+def _voice_src_dir() -> Path | None:
+    """Versioned helper sources. $VTAI_SCRIPTS_DIR wins (tests, custom
+    checkouts), then the repo-adjacent scripts/ dir. A global `uv tool`
+    install ships no scripts/, so sync must run from a checkout."""
+    env = os.environ.get("VTAI_SCRIPTS_DIR")
+    if env:
+        p = Path(env).expanduser()
+        return p if p.is_dir() else None
+    repo = Path(__file__).resolve().parents[2] / "scripts"
+    return repo if repo.is_dir() else None
+
+
+def voice_sync(src: Path, dest: Path, *, check: bool = False) -> tuple[dict[str, str], bool]:
+    """Copy voice helpers src/ → dest/. Returns (status per helper, in_sync).
+
+    Status is one of: installed (new file), updated (checksum differed),
+    unchanged, missing-source. in_sync is True when dest matches src after
+    the call (in check mode: whether it already matched)."""
+    states: dict[str, str] = {}
+    failed = False
+    for name in VOICE_HELPERS:
+        s = src / name
+        d = dest / name
+        if not s.is_file():
+            states[name] = "missing-source"
+            failed = True
+            continue
+        want = hashlib.sha256(s.read_bytes()).hexdigest()
+        have = hashlib.sha256(d.read_bytes()).hexdigest() if d.is_file() else None
+        if have == want:
+            states[name] = "unchanged"
+            continue
+        states[name] = "installed" if have is None else "updated"
+        if check:
+            failed = True
+        else:
+            dest.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(s, d)
+            try:
+                d.chmod(d.stat().st_mode | 0o111)
+            except OSError:
+                pass
+    return states, not failed
+
+
+def cmd_voice_sync(args) -> int:
+    src = _voice_src_dir()
+    if src is None:
+        print("voice helper sources not found: run from a checkout or set "
+              "VTAI_SCRIPTS_DIR", file=sys.stderr)
+        return 1
+    dest = Path(args.dest).expanduser()
+    states, in_sync = voice_sync(src, dest, check=args.check)
+    for name, state in states.items():
+        print(f"{name:14} {state}")
+    if args.check and not in_sync:
+        print(f"helpers out of sync with {src} (run without --check to fix)",
+              file=sys.stderr)
+        return 1
+    if in_sync:
+        print(f"helpers in sync ({dest})")
+    else:
+        print(f"helpers synced to {dest} — ensure it is on PATH")
+    return 0
 
 
 STARTER_BINS = [
@@ -282,6 +354,13 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--token", default=None,
                     help="Bearer token (or VT_HTTP_TOKEN). Required for non-localhost binding.")
     sv.set_defaults(func=cmd_serve)
+
+    vs = sub.add_parser("voice-sync", help="Install/update agent-listen & agent-speak from scripts/")
+    vs.add_argument("--dest", default="~/.local/bin",
+                    help="Install directory (must be on PATH)")
+    vs.add_argument("--check", action="store_true",
+                    help="Report drift without copying (exit 1 when out of sync)")
+    vs.set_defaults(func=cmd_voice_sync)
     return p
 
 

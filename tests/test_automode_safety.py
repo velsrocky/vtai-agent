@@ -104,3 +104,43 @@ def test_judge_unavailable_fails_closed(sandbox, monkeypatch):
     )
     assert not r.ok
     assert "judge unavailable" in r.summary
+
+
+class _FlakyJudge:
+    calls = 0
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def run(self, *args, **kwargs):
+        type(self).calls += 1
+        if type(self).calls == 1:
+            raise RuntimeError("transient inference failure")
+        return _OkResult()
+
+
+class _OkResult:
+    output = "OK"
+
+
+def test_judge_retries_transient_failure(sandbox, monkeypatch):
+    """One flaky judge call must not abort the loop; retry then verify."""
+    _FlakyJudge.calls = 0
+    monkeypatch.setattr("pydantic_ai.Agent", _FlakyJudge)
+    tool = AutoModeTool(_g(sandbox), model=object())
+    verdict, _ = asyncio.run(tool._judge("goal", "reply"))
+    assert verdict == "ok"
+    assert _FlakyJudge.calls == 2
+
+
+def test_judge_build_failure_fails_closed(sandbox, monkeypatch):
+    """A misconfigured provider (build_model raises) must return the error
+    verdict, not crash out of _judge."""
+    import vtai_agent.providers as providers
+
+    monkeypatch.setattr(providers, "build_model", lambda settings: (_ for _ in ()).throw(
+        RuntimeError("no provider configured")))
+    tool = AutoModeTool(_g(sandbox), model=None)
+    verdict, critique = asyncio.run(tool._judge("goal", "reply"))
+    assert verdict == "error"
+    assert "judge unavailable" in critique
