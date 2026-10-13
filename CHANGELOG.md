@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-10-13
+
 ### Added
 - **`vtai voice-sync`**: installs `agent-listen`/`agent-speak` from the
   versioned `scripts/` dir to `~/.local/bin` (`--dest` overrides),
