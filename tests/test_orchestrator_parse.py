@@ -144,6 +144,11 @@ def test_persistent_malformed_calls_fail_the_run_not_ok(sandbox):
 # ---------- system prompt is platform-aware ----------
 def test_system_prompt_names_this_platform():
     from vtai_agent.orchestrator import _MACHINE_OS, _SYSTEM
+    # _MACHINE_OS humanizes the raw platform token: macOS reports "Darwin",
+    # but the prompt (and users) say "macOS". Assert the mapping, not the
+    # raw system() value — that equality only holds on Windows/Linux.
+    expected = {"Windows": "Windows", "Linux": "Linux",
+                "Darwin": "macOS"}.get(platform.system(), platform.system())
+    assert _MACHINE_OS == expected
     prompt = _SYSTEM.format(manifest="", mode="x", machine_os=_MACHINE_OS)
-    assert f"this {platform.system()} machine" in prompt
-    assert _MACHINE_OS == platform.system()
+    assert f"this {expected} machine" in prompt
