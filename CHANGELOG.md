@@ -3,6 +3,20 @@
 ## [Unreleased]
 
 ### Fixed
+- **Delegates worked in the wrong repository behind an interactive opencode**
+  (`delegate_coding`, `auto_mode`): `opencode run` attaches to the shared
+  background service by default, whose project root is whatever the
+  interactive instance opened — the spawned headless run then read and
+  edited files of the host repo (observed deleting nothing but writing to
+  the host's audit log). Delegates now pass `--standalone` (private,
+  cwd-bound server) and set the child's `PWD` env explicitly: opencode
+  resolves its project from `$PWD`, not the process cwd, and a unix-style
+  `/c/...` value makes it fail on Windows.
+- **Coding CLIs were spawned by bare name** (`delegate_coding`, `auto_mode`):
+  `create_subprocess_exec("opencode", ...)` fails with WinError 2 whenever
+  the server process' PATH differs from the user's shell — now spawning the
+  absolute path `shutil.which` resolves, with `.cmd`/`.bat` shims routed
+  through `cmd.exe /c` on Windows.
 - **Voice helpers work on Windows** (`agent-listen`): exact-match dshow device
   auto-detection (names contain spaces; partial names are not matched), a
   Store-stub-proof interpreter pick (`python3`/`python`/`py` sanity-checked;

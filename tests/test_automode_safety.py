@@ -48,7 +48,14 @@ def test_opencode_argv_has_no_dir_flag(sandbox, monkeypatch):
     assert reply == "answer"
     assert cost is None  # opencode headless output carries no spend report
     assert "--dir" not in seen["argv"]
-    assert seen["argv"][:2] == ["opencode", "run"]
+    # argv[0] is the resolved executable (may be an absolute path or a
+    # cmd.exe /c shim wrap on Windows), never a bare unresolvable name.
+    assert "opencode" in seen["argv"][0] or seen["argv"][0] == "cmd.exe"
+    assert "run" in seen["argv"]
+    # detached from the shared background service: the loop must work in
+    # its own cwd, not whatever interactive instance owns the service
+    assert "--standalone" in seen["argv"]
+    assert seen["argv"][-1] == "hi"
     assert seen["cwd"] == str(sandbox.writable)
 
 
@@ -76,7 +83,7 @@ def test_delegate_opencode_argv_has_no_dir_flag(sandbox):
         ),
     )
     assert "--dir" not in argv
-    assert argv[:2] == ["opencode", "run"]
+    assert argv[:3] == ["opencode", "run", "--standalone"]
 
 
 class _DeadJudge:
@@ -222,6 +229,25 @@ def test_judge_unknown_paid_spend_fails_closed(sandbox, monkeypatch):
 
 
 # ---------- deputy CLI spend metering ----------
+def test_resolve_cli_argv_wraps_windows_cmd_shim(monkeypatch):
+    import os
+
+    from vtai_agent.tools.registry import resolve_cli_argv
+
+    monkeypatch.setattr(shutil, "which", lambda n: r"C:\npm\opencode.cmd")
+    argv = resolve_cli_argv("opencode")
+    if os.name == "nt":
+        assert argv == ["cmd.exe", "/c", r"C:\npm\opencode.cmd"]
+    else:
+        assert argv == [r"C:\npm\opencode.cmd"]
+
+    monkeypatch.setattr(shutil, "which", lambda n: "/usr/bin/opencode")
+    assert resolve_cli_argv("opencode") == ["/usr/bin/opencode"]
+
+    monkeypatch.setattr(shutil, "which", lambda n: None)
+    assert resolve_cli_argv("opencode") is None
+
+
 def test_claude_argv_uses_json_output(sandbox, monkeypatch):
     seen: dict = {}
     monkeypatch.setattr(

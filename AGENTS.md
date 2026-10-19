@@ -78,6 +78,16 @@ Known facts:
 - Voice fixes (2026-10-02): assistant is Vitae; `agent-listen --vad` stops on silence; errors carry exit codes; `DelegateCodingTool.require_approval` defaults true.
 - Delegate gotcha (2026-10-02): pi has no authenticated provider here; it exits 0 with a raw tool-call JSON and no diff, and delegate_coding now fails closed. Use opencode/claude or run `pi auth` first.
 
+- Windows dev box voice stack (2026-10-19): Lemonade installed, auto-starts on
+  127.0.0.1:13305; STT must be Moonshine-Tiny-Streaming — the whisper.cpp
+  recipe returns all-zero tokens on this box's RDNA2 GPU; agent-listen now
+  defaults to Moonshine on Windows, Whisper elsewhere.
+- `vtai` is installed user-wide (pip --user, 0.6.0+); opencode MCP server
+  registered globally in ~/.config/opencode/opencode.jsonc. The repo's
+  config/settings.toml is the Linux box's production config — never
+  regenerate it from this machine; the Windows config is
+  ~/.vtaiagent/settings.toml.
+
 Rules:
 
 1. Before acting on a memory-worthy question (name, preferences, conventions),

@@ -42,7 +42,7 @@ def _fake_delegate(monkeypatch):
         return "did the edit", "", 0
 
     monkeypatch.setattr(DelegateCodingTool, "_run", fake_run)
-    monkeypatch.setattr("vtai_agent.tools.delegate.shutil.which",
+    monkeypatch.setattr(shutil, "which",
                         lambda n: _REAL_WHICH(n) or f"/usr/bin/{n}")
 
 

@@ -106,7 +106,7 @@ def test_backup_execute_transfers(sandbox):
 def test_delegate_requires_git_repo(sandbox, monkeypatch):
     # don't depend on a coding CLI being installed (true on CI runners)
     monkeypatch.setattr(
-        "vtai_agent.tools.delegate.shutil.which",
+        shutil, "which",
         lambda name: f"/usr/bin/{name}",
     )
     tool = DelegateCodingTool(_g(sandbox))
@@ -123,7 +123,7 @@ def test_delegate_dry_run_touches_nothing(sandbox, monkeypatch, cli):
     # Hermetic: dry runs only need `which` to succeed, never the CLI itself,
     # so CI runners without the coding CLIs still exercise this.
     monkeypatch.setattr(
-        "vtai_agent.tools.delegate.shutil.which",
+        shutil, "which",
         lambda n: _REAL_WHICH(n) or f"/usr/bin/{n}",
     )
     repo = sandbox.writable / "repo"
@@ -169,7 +169,7 @@ def test_delegate_pi_json_only_output_is_failure(sandbox, monkeypatch):
 
     monkeypatch.setattr(DelegateCodingTool, "_run", fake_run)
     monkeypatch.setattr(
-        "vtai_agent.tools.delegate.shutil.which", lambda n: _REAL_WHICH(n) or f"/usr/bin/{n}",
+        shutil, "which", lambda n: _REAL_WHICH(n) or f"/usr/bin/{n}",
     )
     tool = DelegateCodingTool(_g(sandbox))
     r = asyncio.run(tool.run(DelegateCodingInput(

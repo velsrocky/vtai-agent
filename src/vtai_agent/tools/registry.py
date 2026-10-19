@@ -7,11 +7,31 @@ matter who is driving.
 """
 
 from abc import ABC, abstractmethod
+import os
+import shutil
 from typing import Any, ClassVar, Generic, TypeVar
 
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def resolve_cli_argv(cli_name: str) -> list[str] | None:
+    """Full argv prefix for spawning a coding CLI on this platform, or None
+    when it is not installed.
+
+    A bare CLI name is not safe to spawn: the server process' PATH can
+    differ from the user's shell (WinError 2 in practice), and on Windows
+    npm-installed CLIs are .cmd/.bat shims that CreateProcess cannot exec
+    directly. Spawn the absolute path `shutil.which` resolved instead,
+    routed through cmd.exe when it is a shim.
+    """
+    found = shutil.which(cli_name)
+    if found is None:
+        return None
+    if os.name == "nt" and found.lower().endswith((".cmd", ".bat")):
+        return ["cmd.exe", "/c", found]
+    return [found]
 
 
 class ToolResult(BaseModel):

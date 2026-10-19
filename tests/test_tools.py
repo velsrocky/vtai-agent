@@ -71,7 +71,7 @@ def test_delegate_rolls_back_on_failed_verify(sandbox, monkeypatch):
         return "did the edit", "", 0
 
     monkeypatch.setattr(DelegateCodingTool, "_run", fake_run)
-    monkeypatch.setattr("vtai_agent.tools.delegate.shutil.which",
+    monkeypatch.setattr(shutil, "which",
                         lambda n: _REAL_WHICH(n) or f"/usr/bin/{n}")
     tool = DelegateCodingTool(_g(sandbox))
     # `ls /nonexistent-definitely` exits non-zero -> verify gate fails
@@ -94,7 +94,7 @@ def test_delegate_keeps_changes_when_verify_passes(sandbox, monkeypatch):
         return "did the edit", "", 0
 
     monkeypatch.setattr(DelegateCodingTool, "_run", fake_run)
-    monkeypatch.setattr("vtai_agent.tools.delegate.shutil.which",
+    monkeypatch.setattr(shutil, "which",
                         lambda n: _REAL_WHICH(n) or f"/usr/bin/{n}")
     tool = DelegateCodingTool(_g(sandbox))
     # `ls <repo>` succeeds -> verify gate passes -> changes kept

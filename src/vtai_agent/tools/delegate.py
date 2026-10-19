@@ -12,14 +12,14 @@ Safety contract, in order:
 
 import asyncio
 import json
-import shutil
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from .. import db
 from ..guardrails import Guardrails
-from .registry import Tool, ToolError, ToolResult
+from .registry import Tool, ToolError, ToolResult, resolve_cli_argv
 
 CLI_BINARY = {
     "opencode": "opencode",
@@ -74,7 +74,8 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
         if inp.cli not in CLI_BINARY:
             raise ValueError(f"unknown cli {inp.cli!r}; choose from {list(CLI_BINARY)}")
         binary = CLI_BINARY[inp.cli]
-        if shutil.which(binary) is None:
+        exec_prefix = resolve_cli_argv(binary)
+        if exec_prefix is None:
             raise FileNotFoundError(f"{binary} is not installed")
 
         work = self.g.check_writable(inp.working_dir)
@@ -128,7 +129,7 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
             raise ToolError("cannot snapshot repo (git add/stash failed); refusing to delegate")
         self.g.ensure_not_killed()
 
-        argv = self._build_argv(binary, inp)
+        argv = [*exec_prefix, *self._build_argv(binary, inp)[1:]]
         db.audit(run_id, "delegate", f"{inp.cli}: {inp.prompt[:120]}", allowed=True)
         try:
             stdout, stderr, code = await self._run(argv, work, inp.timeout)
@@ -324,8 +325,11 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
     def _build_argv(self, binary: str, inp: DelegateCodingInput) -> list[str]:
         if binary == "opencode":
             # opencode v2 `run` takes the message positionally and operates in
-            # cwd (set by _run); it has no --dir flag.
-            return ["opencode", "run", inp.prompt]
+            # cwd (set by _run); it has no --dir flag. Without --standalone it
+            # attaches to the opencode background SERVICE, whose project root
+            # is whatever interactive instance is running — the delegate then
+            # edits that project instead of its own working directory.
+            return ["opencode", "run", "--standalone", inp.prompt]
         if binary == "claude":
             # --output-format json exposes the reply in obj["result"] and the
             # spend in obj["total_cost_usd"] (captured into cli_cost_usd).
@@ -337,8 +341,15 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
         return ["pi", "-p", "--approve", inp.prompt]
 
     async def _run(self, argv: list[str], cwd: Path, timeout: float):
+        env = dict(os.environ)
+        # opencode resolves its project from $PWD rather than the process
+        # cwd: a child inherits the server process' stale PWD and attaches
+        # to the wrong project (observed: the delegate edited the HOST
+        # repo's files). Must be the native path form — a unix-style PWD
+        # (/c/...) makes opencode fail on Windows.
+        env["PWD"] = str(cwd)
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=str(cwd),
+            *argv, cwd=str(cwd), env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

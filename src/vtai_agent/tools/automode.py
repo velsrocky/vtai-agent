@@ -8,6 +8,7 @@ quoting the gap and the previous attempt → repeat, bounded.
 
 import asyncio
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from pydantic import BaseModel, Field
 from .. import db
 from ..config import Settings, get_settings
 from ..guardrails import Guardrails
-from .registry import Tool, ToolError, ToolResult
+from .registry import Tool, ToolError, ToolResult, resolve_cli_argv
 
 CLI_BINARY = {"opencode": "opencode", "claude": "claude", "pi": "pi"}
 
@@ -168,8 +169,11 @@ class AutoModeTool(Tool[AutoModeInput]):
         if cli == "opencode":
             # opencode v2 `run` takes the message positionally and operates in
             # cwd (already set below); it has no --dir flag — an unknown flag
-            # makes it print help and exit non-zero.
-            return ["opencode", "run", prompt]
+            # makes it print help and exit non-zero. --standalone keeps the
+            # run off the shared background service: without it the loop
+            # attaches to whatever interactive opencode instance owns that
+            # process' project root and works in the wrong repository.
+            return ["opencode", "run", "--standalone", prompt]
         if cli == "claude":
             # JSON output: the reply is obj["result"] and the spend is
             # obj["total_cost_usd"] — metered against budget_usd_per_run
@@ -182,8 +186,18 @@ class AutoModeTool(Tool[AutoModeInput]):
         """Dispatch one headless CLI turn. Returns (reply, reported_cost_usd);
         reported_cost_usd is None for CLIs without a cost report."""
         argv = self._cli_argv(cli, prompt)
+        # Spawn the resolved executable, not the bare name: the server
+        # process' PATH can differ from the user's shell, and Windows .cmd
+        # shims must go through cmd.exe.
+        prefix = resolve_cli_argv(cli)
+        if prefix is not None:
+            argv = [*prefix, *argv[1:]]
+        env = dict(os.environ)
+        # Same PWD rule as the delegate tool: opencode picks its project
+        # from $PWD, so a stale inherited value points it at the wrong repo.
+        env["PWD"] = str(cwd)
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=str(cwd),
+            *argv, cwd=str(cwd), env=env,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         try:
