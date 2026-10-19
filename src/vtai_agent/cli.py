@@ -198,7 +198,27 @@ def cmd_info(_args) -> int:
     print(f"  writable roots  : {[str(p) for p in s.paths.writable_roots]}")
     print(f"  dry_run_default : {s.guardrails.dry_run_default}")
     print(f"  shell allowlist : {s.guardrails.shell_allowlist}")
+    _print_pending_approvals()
     return 0
+
+
+def _print_pending_approvals() -> None:
+    """A delegate that was kept for review is easy to forget — surface the
+    count in `vtai info` so an unattended run is visible without knowing to
+    ask for `vtai approve`."""
+    from . import db
+
+    try:
+        rows = db.list_pending_approvals()
+    except Exception as e:  # the DB may not exist yet; info must not fail
+        print(f"  pending approvals: unknown ({e})")
+        return
+    if not rows:
+        print("  pending approvals: none")
+        return
+    print(f"  pending approvals: {len(rows)} (vtai approve — keep or --rollback)")
+    for pa in rows[:5]:
+        print(f"    #{pa.id:<4} {pa.cli:<8} {pa.working_dir}")
 
 
 def cmd_tools(_args) -> int:

@@ -21,6 +21,33 @@ from vtai_agent.tools.registry import ToolError
 _REAL_WHICH = shutil.which
 
 
+def test_info_surfaces_pending_approvals(capsys, sandbox):
+    """A delegate kept for review is easy to forget — `vtai info` must show
+    it without the user having to know to ask for `vtai approve`."""
+    from vtai_agent import cli
+
+    db.create_pending_approval(
+        run_id=None, cli="opencode", prompt="fix the bug",
+        working_dir=str(sandbox.tmp), snapshot="", orig_index="", diff="",
+    )
+    cli.cmd_info(None)
+    out = capsys.readouterr().out
+    assert "pending approvals: 1" in out
+    assert "vtai approve" in out
+
+
+def test_info_survives_an_unreadable_audit_db(capsys, sandbox, monkeypatch):
+    """`info` is a diagnostic command: it must report, not crash."""
+    from vtai_agent import cli
+
+    def boom(*_a, **_k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(db, "list_pending_approvals", boom)
+    cli.cmd_info(None)
+    assert "pending approvals" in capsys.readouterr().out
+
+
 def _g(sandbox) -> Guardrails:
     return Guardrails(sandbox.cfg, sandbox.settings)
 

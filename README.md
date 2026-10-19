@@ -270,6 +270,9 @@ uv run vtai approve 7        # keep the pending diff
 uv run vtai approve 7 --rollback
 ```
 
+`vtai info` shows how many approvals are waiting, so a delegate that was kept
+for review does not get lost.
+
 ## Audit log
 
 Every allow/deny is stored in `~/.vtaiagent/vtai.db`. Query it without a SQL

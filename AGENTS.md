@@ -70,26 +70,17 @@ Known facts:
 
 - Assistant display name: Vitae.
 - Microphone fix (2026-10-02): internal mic boost must stay at 0 and capture
-  at 75%; applied at login by ~/.local/bin/vtai-audio-fix.sh via the
-  vtai-agent-audio-fix systemd user service. Do not raise the boost, it
+  at 75%; applied at login by a login-time script. Do not raise the boost, it
   clips the input and corrupts transcription.
 - Voice mode requires agent-listen + agent-speak; noisy transcripts mean the
   mic level is wrong, not that the user misspoke.
 - Voice fixes (2026-10-02): assistant is Vitae; `agent-listen --vad` stops on silence; errors carry exit codes; `DelegateCodingTool.require_approval` defaults true.
 - Delegate gotcha (2026-10-02): pi has no authenticated provider here; it exits 0 with a raw tool-call JSON and no diff, and delegate_coding now fails closed. Use opencode/claude or run `pi auth` first.
-
-- Windows dev box voice stack (2026-10-19): Lemonade installed, auto-starts on
-  127.0.0.1:13305; STT must be Moonshine-Tiny-Streaming — the whisper.cpp
-  recipe returns all-zero tokens on this box's RDNA2 GPU; agent-listen now
-  defaults to Moonshine on Windows, Whisper elsewhere.
-- `vtai` is installed user-wide (pip --user, 0.6.0+); opencode MCP server
-  registered globally in ~/.config/opencode/opencode.jsonc. The repo's
-  config/settings.toml is the Linux box's production config — never
-  regenerate it from this machine; the Windows config is
-  ~/.vtaiagent/settings.toml.
-- Mac (2026-10-20): `vtai` is on PATH via `uv tool install --editable` (tracks
-  the checkout). This Mac's personal config is ~/.vtaiagent/settings.toml —
-  point VT_CONFIG at it; the repo's config/settings.toml is the Linux box's.
+- The repo's `config/settings.toml` is another machine's production config —
+  never regenerate it. Per-machine config lives in `~/.vtaiagent/settings.toml`
+  (point `VT_CONFIG` at it); `vtai info` prints the file in use.
+- `vtai` is on PATH via `uv tool install --editable` (tracks the checkout);
+  the MCP server is registered globally for opencode/Claude Code.
 - Daemon PATH gotcha (2026-10-20): a service started by launchd/systemd gets
   PATH=/usr/bin:/bin:..., so the MCP server must be registered with an
   ABSOLUTE uv path (register-mcp.sh does this) or it dies with
@@ -97,8 +88,8 @@ Known facts:
 - Never use `launchctl submit` for one-shot background work: submitted jobs
   carry KeepAlive and respawn forever (it caused an opencode service restart
   loop). Use a detached `subprocess.Popen(..., start_new_session=True)`.
-- The repo lockfile is uv revision 5 (needs uv >= 0.13.1) — the Linux box
-  needs `uv self update` before `uv sync` will work there.
+- The repo lockfile is uv revision 5 (needs uv >= 0.13.1) — other machines
+  need `uv self update` before `uv sync` will work there.
 
 Rules:
 

@@ -1,8 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.2] - 2026-10-20
 
 ### Added
+- **`vtai info` shows pending delegate approvals.** A delegate kept for review
+  is easy to forget; `info` now prints the count (and the first few) with a
+  pointer to `vtai approve`. An unreadable audit DB is reported, not fatal —
+  `info` is a diagnostic command.
 - **`vtai info` names the config file in effect** and where it came from
   (`$VT_CONFIG`, the checkout's `config/settings.toml`, or the user-level
   `~/.vtaiagent/settings.toml`). A user cloning the repo got the
@@ -61,9 +65,10 @@
   `0.5.5` after the 0.6.0/0.6.1 releases.
 
 ### Tests
-- 9 new tests (118 pass): config-source reporting, `vtai info` naming the
-  active config file and reporting an invalid one instead of crashing, the
-  failed-validation cache, and the symlinked-home deny glob. The suite now
+- 11 new tests (120 pass): config-source reporting, `vtai info` naming the
+  active config file, reporting an invalid one instead of crashing, and
+  listing pending approvals (and surviving an unreadable DB); the
+  failed-validation cache; and the symlinked-home deny glob. The suite now
   passes with a HOME that has none of the configured dirs (previously two
   guardrail tests depended on the developer's real `~/.ssh`).
 
