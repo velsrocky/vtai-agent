@@ -12,6 +12,21 @@
   would overwrite a tracked file with a starter config).
 
 ### Fixed
+- **Deny globs did not match under a symlinked home.** The paths being
+  checked are resolved (`Path(...).expanduser().resolve()`), but the deny
+  patterns were only expanded, never resolved — so `~/.ssh/**` silently
+  stopped matching when the home directory path contained a symlink (macOS:
+  `/tmp` → `/private/tmp`), leaving the protected directory **readable**.
+  The literal head of a pattern is now resolved too; the wildcard tail is
+  left alone so relative patterns like `**/.env` keep matching anywhere.
+- **`vtai info` crashed on an invalid config.** It is the diagnostic
+  command: it now reports `config: INVALID` with the validation errors and
+  exits 1, and the error itself says how to fix it (`vtai init`, or point
+  `VT_CONFIG` at a config for this machine).
+- **A config that failed validation was cached anyway.** `get_settings()`
+  assigned the settings before validating, so the first caller saw the error
+  and every later caller silently got the invalid config. Validation now
+  happens before the cache is populated.
 - **`scripts/register-mcp.sh` registers an absolute `uv` path.** A bare `uv`
   fails with `NotFound: ChildProcess.spawn (uv ...)` when the client spawns
   the server from a daemon with a minimal PATH (launchd/systemd hand down
@@ -46,8 +61,11 @@
   `0.5.5` after the 0.6.0/0.6.1 releases.
 
 ### Tests
-- 6 new tests (115 pass): config-source reporting, `vtai info` naming the
-  active config file, and the `vtai init` `$VT_CONFIG` hint.
+- 9 new tests (118 pass): config-source reporting, `vtai info` naming the
+  active config file and reporting an invalid one instead of crashing, the
+  failed-validation cache, and the symlinked-home deny glob. The suite now
+  passes with a HOME that has none of the configured dirs (previously two
+  guardrail tests depended on the developer's real `~/.ssh`).
 
 ## [0.6.1] - 2026-10-19
 

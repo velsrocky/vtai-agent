@@ -152,7 +152,25 @@ class Guardrails:
 
     @staticmethod
     def _expand_glob(g: str) -> str:
-        return str(Path(g).expanduser())
+        """Expand `~` and resolve the literal head of the pattern (everything
+        before the first wildcard).
+
+        The paths being checked are resolved (`Path(...).expanduser()
+        .resolve()`), so the pattern has to be resolved the same way. Without
+        it a deny glob silently stops matching when the home directory path
+        contains a symlink (macOS: /tmp -> /private/tmp), and a protected
+        directory would be readable. The wildcard tail is left untouched —
+        resolving it would turn a relative pattern like `**/.env` into an
+        absolute one and stop it from matching anywhere.
+        """
+        head, sep, tail = g.partition("*")
+        if not head:
+            return g  # starts with a wildcard: nothing to expand
+        trailing = head.endswith(("/", "\\"))
+        head = str(Path(head).expanduser().resolve())
+        if trailing and not head.endswith(os.sep):
+            head += os.sep
+        return head + sep + tail
 
     # ---------- shell ----------
     def check_shell(self, command: str,

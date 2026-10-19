@@ -181,11 +181,18 @@ def cmd_init(args) -> int:
 
 
 def cmd_info(_args) -> int:
-    s = get_settings()
     from .config import CONFIG_TOML, config_source
 
     print(f"VT-AIAgent v{__version__}")
     print(f"  config file     : {CONFIG_TOML} ({config_source()})")
+    try:
+        s = get_settings()
+    except ValueError as e:
+        # `info` is the diagnostic command: an invalid config is the thing
+        # the user is here to find, so report it instead of raising.
+        print("  config          : INVALID")
+        print(str(e), file=sys.stderr)
+        return 1
     print(f"  active provider : {describe_active(s)}")
     print(f"  data dir        : {s.paths.data_dir}")
     print(f"  writable roots  : {[str(p) for p in s.paths.writable_roots]}")

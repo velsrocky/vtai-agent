@@ -28,13 +28,34 @@ def test_user_level_when_no_repo_config(monkeypatch):
     assert config_source() == "user-level"
 
 
-def test_info_names_the_config_file(capsys):
+def test_info_names_the_config_file(capsys, sandbox):
+    """`sandbox` pins the settings, so this does not depend on the
+    machine's (or the checkout's) config validating."""
     from vtai_agent.cli import cmd_info
 
     cmd_info(None)
     out = capsys.readouterr().out
     assert "config file" in out
     assert ".toml (" in out  # path plus the source in parentheses
+
+
+def test_info_reports_an_invalid_config_instead_of_crashing(capsys, monkeypatch):
+    """`info` is the diagnostic command — a broken config is what the user
+    came to find, so it must be reported, not raised."""
+    from vtai_agent import cli, config
+
+    monkeypatch.setattr(config, "_settings", None)
+    monkeypatch.setattr(
+        config,
+        "validate_settings",
+        lambda s: (_ for _ in ()).throw(ValueError("invalid configuration:\n  - nope")),
+    )
+
+    rc = cli.cmd_info(None)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "INVALID" in captured.out
+    assert "nope" in captured.err
 
 
 def test_init_points_at_vt_config_for_repo_adjacent_config(capsys, monkeypatch,

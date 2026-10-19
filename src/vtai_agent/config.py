@@ -207,7 +207,11 @@ def validate_settings(s: Settings) -> None:
         if not Path(r).exists():
             errs.append(f"writable_roots entry does not exist: {r}")
     if errs:
-        raise ValueError("invalid configuration:\n  - " + "\n  - ".join(errs))
+        raise ValueError(
+            "invalid configuration:\n  - " + "\n  - ".join(errs)
+            + "\n\n  fix: run `vtai init` (creates the missing dirs and a starter"
+              " config),\n       or point VT_CONFIG at a config for this machine."
+        )
     # Soft warning: an empty deny list is legal, but it means nothing is
     # protected — reads and writes touch everything outside nothing. The
     # starter `vtai init` config sets ~/.ssh, ~/.gnupg, ~/.aws, **/.env.
@@ -221,6 +225,11 @@ def validate_settings(s: Settings) -> None:
 def get_settings() -> Settings:
     global _settings
     if _settings is None:
-        _settings = Settings()
-        validate_settings(_settings)
+        s = Settings()
+        # Validate before caching: a config that failed validation must not
+        # be left in the cache, or every later caller would silently get an
+        # invalid config (the first caller sees the error, the next one
+        # doesn't).
+        validate_settings(s)
+        _settings = s
     return _settings

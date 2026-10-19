@@ -1,8 +1,10 @@
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
+from vtai_agent.config import Guardrails as GuardrailsConfig, Paths, Settings
 from vtai_agent.guardrails import Guardrails, GuardrailViolation
 
 
@@ -192,10 +194,52 @@ def test_is_denied_on_protected_exact(g, sandbox):
     assert not g.is_denied(sandbox.writable)
 
 
-def test_deny_glob_lilke_ssh_child_expansion(g):
+def test_deny_glob_lilke_ssh_child_expansion(sandbox, tmp_path, monkeypatch):
     # '~/.ssh/**' must also block the literal dir and nested paths
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    # Built after the HOME change: the pattern is expanded at construction.
+    g = Guardrails(sandbox.cfg, sandbox.settings)
     assert g.is_denied("~/.ssh")
     assert g.is_denied("~/.ssh/.ssh") or g.is_denied("~/.ssh/id_ecdsa")
+
+
+def test_deny_glob_protects_a_home_reached_through_a_symlink(tmp_path, monkeypatch):
+    """The paths being checked are resolved, so the deny pattern has to be
+    resolved too: a home directory reached through a symlink (macOS:
+    /tmp -> /private/tmp) must still be protected — otherwise a secret
+    directory under it is readable."""
+    real = tmp_path / "real-home"
+    (real / ".ssh").mkdir(parents=True)
+    link = tmp_path / "linked-home"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this platform")
+
+    monkeypatch.setenv("HOME", str(link))
+    monkeypatch.setenv("USERPROFILE", str(link))
+
+    cfg = GuardrailsConfig(
+        shell_allowlist=["ls"],
+        deny_globs=["~/.ssh/**"],
+        trusted_bin_dirs=[str(Path(sys.executable).parent)],
+    )
+    paths = Paths(writable_roots=[tmp_path], data_dir=tmp_path / "data")
+    settings = Settings(guardrails=cfg, paths=paths)
+    # The audit write goes through the global settings; with HOME moved, the
+    # real ones would not validate. Point them at this test's settings.
+    monkeypatch.setattr("vtai_agent.config._settings", settings)
+    monkeypatch.setattr("vtai_agent.db._engine", None)
+
+    g = Guardrails(cfg, settings)
+
+    assert g.is_denied("~/.ssh")
+    assert g.is_denied("~/.ssh/id_rsa")
+    with pytest.raises(GuardrailViolation):
+        g.check_readable("~/.ssh/id_rsa")
 
 
 def test_check_writable_symlink_into_protected(g, sandbox):
