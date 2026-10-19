@@ -2,6 +2,11 @@
 
 ## Setup
 
+Requires **uv >= 0.13.1** (the lockfile is `revision = 5`; older uv cannot
+read it). The floor is declared in `pyproject.toml` as
+`[tool.uv] required-version`, so uv reports a clear error instead of a
+lockfile-parse failure, and `setup-uv` reads it to pick the CI uv version.
+
 ```bash
 # Clone & install
 git clone https://github.com/your-org/vtai-agent.git
@@ -10,6 +15,16 @@ uv sync --dev
 
 # Run tests
 uv run pytest tests/
+```
+
+### CLI on your PATH (optional)
+
+The MCP server is registered per machine; to get the `vtai` CLI available
+outside the repo, install it as an editable tool so it tracks the checkout:
+
+```bash
+uv tool install --editable /path/to/vtai-agent
+# -> installs `vtai` into `~/.local/bin` (check with `uv tool dir --bin`)
 ```
 
 ## Development Guidelines

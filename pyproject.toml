@@ -32,5 +32,11 @@ src = ["src", "tests"]
 select = ["E4", "E7", "E9", "F"]
 
 [build-system]
-requires = ["uv_build>=0.12.3,<0.13.0"]
+requires = ["uv_build>=0.12.3,<0.14.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+# The lockfile is revision 5 (uv >= 0.13 writes it; older uv refuses to read
+# it). Declaring the floor here makes uv fail with a clear message instead of
+# a lockfile-parse error, and setup-uv reads it to pick the CI uv version.
+required-version = ">=0.13.1"

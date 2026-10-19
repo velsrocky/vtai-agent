@@ -33,6 +33,9 @@ opencode / Claude Code / pi — and drivable directly via the `vtai` CLI.
 
 ## Use
 
+Requires **uv >= 0.13.1** (declared as `[tool.uv] required-version`; the
+lockfile is revision 5).
+
 ```bash
 uv sync                                  # install
 uv run vtai init                         # create/validate config, dirs, writable roots

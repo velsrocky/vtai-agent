@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **uv floor is now declared.** `pyproject.toml` carries
+  `[tool.uv] required-version = ">=0.13.1"`, and `uv.lock` was relocked to
+  the revision-5 format uv 0.13 writes. Older uv cannot read a revision-5
+  lockfile; declaring the floor turns that into a clear "required uv version
+  does not match" error instead of a lockfile-parse failure, and `setup-uv`
+  reads the same field to pick the CI uv version.
+- **`uv_build` upper bound widened** to `<0.14.0` so the build backend no
+  longer warns on uv 0.13 (`uv sync` was printing
+  `build_system.requires does not contain the current uv version 0.13.1`).
+- The lockfile now records the package as `vtai-agent==0.6.1` — it still said
+  `0.5.5` after the 0.6.0/0.6.1 releases.
+
+### Docs
+- README/CONTRIBUTING state the uv >= 0.13.1 requirement, and CONTRIBUTING
+  documents `uv tool install --editable` for putting the `vtai` CLI on PATH
+  outside the checkout.
+
 ## [0.6.1] - 2026-10-19
 
 ### Fixed
