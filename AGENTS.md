@@ -80,7 +80,10 @@ Known facts:
   never regenerate it. Per-machine config lives in `~/.vtaiagent/settings.toml`
   (point `VT_CONFIG` at it); `vtai info` prints the file in use.
 - `vtai` is on PATH via `uv tool install --editable` (tracks the checkout);
-  the MCP server is registered globally for opencode/Claude Code.
+  the MCP server is registered globally for opencode/Claude Code. An editable
+  tool install stamps the *version* at install time: after a version bump,
+  re-run `uv tool install --editable . --force` or `vtai info` still reports
+  the old version.
 - Daemon PATH gotcha (2026-10-20): a service started by launchd/systemd gets
   PATH=/usr/bin:/bin:..., so the MCP server must be registered with an
   ABSOLUTE uv path (register-mcp.sh does this) or it dies with
