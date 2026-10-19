@@ -20,11 +20,15 @@ CMD=("$UV_BIN" run --directory "$PROJECT_DIR" vtai serve)
 echo "Registering vtai-agent MCP server (project: $PROJECT_DIR)"
 
 # --- opencode: global config, merged with existing providers ---
-OPENCODE_CONFIG="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.jsonc}"
+# opencode writes the global MCP registry to opencode.json (a hand-written
+# opencode.jsonc in the same directory is merged on top of it).
+OPENCODE_CONFIG="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.json}"
 if command -v opencode >/dev/null 2>&1; then
   echo "  opencode -> $OPENCODE_CONFIG"
-  opencode mcp add vtai-agent -- "${CMD[@]}" 2>/dev/null \
-    || echo "  (manual edit needed: add mcp.vtai-agent to $OPENCODE_CONFIG)"
+  # --global writes the user-level config; without it the server lands in the
+  # current directory's opencode.json and is only visible in this project.
+  opencode mcp add --global vtai-agent -- "${CMD[@]}" 2>/dev/null \
+    || echo "  (manual edit needed: add mcp.servers.vtai-agent to $OPENCODE_CONFIG)"
 fi
 
 # --- Claude Code: user-scoped ---

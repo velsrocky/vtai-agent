@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **`scripts/register-mcp.sh` registered the server per project, not
+  globally.** `opencode mcp add` writes to the current directory's
+  `opencode.json` unless `--global` is passed, so the script's own comment
+  ("global config, merged with existing providers") did not match what it
+  did — the server was only visible inside the checkout. It now passes
+  `--global` and points at the file opencode actually writes
+  (`~/.config/opencode/opencode.json`, not `.jsonc`).
+
 ## [0.6.2] - 2026-10-20
 
 ### Added
