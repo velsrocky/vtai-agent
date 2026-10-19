@@ -29,6 +29,20 @@ def _find_config_toml() -> Path:
 CONFIG_TOML = _find_config_toml()
 
 
+def config_source() -> str:
+    """Which of the three locations the active config came from. Surfaced by
+    `vtai info` so a user can tell whose settings they are running under:
+    '$VT_CONFIG' (explicit override), 'repo-adjacent' (the checked-in
+    config/settings.toml of a clone — a dev checkout's own settings), or
+    'user-level' (~/.vtaiagent/settings.toml, written by `vtai init`)."""
+    if os.environ.get("VT_CONFIG"):
+        return "$VT_CONFIG"
+    repo = Path(__file__).resolve().parents[2] / "config" / "settings.toml"
+    if repo.exists():
+        return "repo-adjacent"
+    return "user-level"
+
+
 class _Priced(BaseModel):
     """USD per 1,000 tokens. None = fall back to pydantic-ai's native cost
     table, then 0.0 (free)."""

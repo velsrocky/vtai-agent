@@ -5,7 +5,17 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CMD=(uv run --directory "$PROJECT_DIR" vtai serve)
+
+# Resolve uv to an absolute path. A bare "uv" in the registered command breaks
+# when the client spawns the server from a daemon with a minimal PATH
+# (launchd/systemd give PATH=/usr/bin:/bin:...), and the MCP server then
+# fails to start with "NotFound: ChildProcess.spawn (uv ...)".
+UV_BIN="$(command -v uv || true)"
+if [ -z "$UV_BIN" ]; then
+  echo "error: uv not found on PATH — install it: https://docs.astral.sh/uv/" >&2
+  exit 1
+fi
+CMD=("$UV_BIN" run --directory "$PROJECT_DIR" vtai serve)
 
 echo "Registering vtai-agent MCP server (project: $PROJECT_DIR)"
 
@@ -26,8 +36,8 @@ fi
 # --- pi: no native MCP; verify the CLI is reachable instead ---
 if command -v pi >/dev/null 2>&1; then
   echo "  pi      -> no native MCP (extension-only); CLI fallback:"
-  echo "            pi \"run: \$(uv run --directory $PROJECT_DIR vtai run system_info)\""
+  echo "            pi \"run: \$($UV_BIN run --directory $PROJECT_DIR vtai run system_info)\""
 fi
 
 echo
-echo "Verify from ${PROJECT_DIR}: uv run vtai info"
+echo "Verify from ${PROJECT_DIR}: $UV_BIN run vtai info"

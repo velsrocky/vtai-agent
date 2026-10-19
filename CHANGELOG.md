@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Added
+- **`vtai info` names the config file in effect** and where it came from
+  (`$VT_CONFIG`, the checkout's `config/settings.toml`, or the user-level
+  `~/.vtaiagent/settings.toml`). A user cloning the repo got the
+  maintainer's settings with no indication of it.
+- **`vtai init` points at the per-user config** when the checkout's own
+  `config/settings.toml` is in use, instead of suggesting `--force` (which
+  would overwrite a tracked file with a starter config).
+
+### Fixed
+- **`scripts/register-mcp.sh` registers an absolute `uv` path.** A bare `uv`
+  fails with `NotFound: ChildProcess.spawn (uv ...)` when the client spawns
+  the server from a daemon with a minimal PATH (launchd/systemd hand down
+  `PATH=/usr/bin:/bin:...`); the script also fails fast with an install hint
+  when uv is missing entirely.
+
+### Docs
+- **README: a Quick start for someone else's machine** — prerequisites table
+  (OS, Python, uv floor, planner LLM, optional rsync/ffmpeg/Lemonade), install,
+  the config-resolution order and how to point the agent at a personal config
+  (`$VT_CONFIG`), choosing a model, verification, and MCP registration.
+  Also: Windows setup (Git Bash coreutils on PATH), troubleshooting for the
+  setup/MCP failure modes, and the machine-specific leftovers removed.
+- **docs/DEPLOYMENT.md rewritten**: Linux-only → Linux/macOS/Windows,
+  placeholder clone URL → the real one, uv >= 0.13.1, config resolution,
+  HTTP transport, `vtai` on PATH, correct test count.
+- **docs/EXAMPLES.md**: "seven registered tools" → eight (`auto_mode`), the
+  0.6.0 pending-approval flow (non-interactive runs now *keep* the changes
+  instead of rolling back), plus `vtai approve` and `auto_mode` examples.
+
 ### Changed
 - **uv floor is now declared.** `pyproject.toml` carries
   `[tool.uv] required-version = ">=0.13.1"`, and `uv.lock` was relocked to
@@ -15,10 +45,9 @@
 - The lockfile now records the package as `vtai-agent==0.6.1` — it still said
   `0.5.5` after the 0.6.0/0.6.1 releases.
 
-### Docs
-- README/CONTRIBUTING state the uv >= 0.13.1 requirement, and CONTRIBUTING
-  documents `uv tool install --editable` for putting the `vtai` CLI on PATH
-  outside the checkout.
+### Tests
+- 6 new tests (115 pass): config-source reporting, `vtai info` naming the
+  active config file, and the `vtai init` `$VT_CONFIG` hint.
 
 ## [0.6.1] - 2026-10-19
 

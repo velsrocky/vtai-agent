@@ -1,6 +1,6 @@
 # VT-AIAgent
 
-System-automation agent for this machine, exposed as an MCP server for
+System-automation agent for **your** machine, exposed as an MCP server for
 opencode / Claude Code / pi — and drivable directly via the `vtai` CLI.
 
 ## Tools
@@ -14,6 +14,7 @@ opencode / Claude Code / pi — and drivable directly via the `vtai` CLI.
 | `transcode_media` | VAAPI-accelerated batch video transcode; never touches originals |
 | `disk_audit` | Read-only scan for reclaimable disk space |
 | `delegate_coding` | Hand tasks to opencode/claude/pi; git snapshot + verify + rollback; require human approval by default |
+| `auto_mode` | Autonomous loop: hand a goal to a coding CLI, review the reply, iterate until it matches |
 
 ## Safety model
 
@@ -31,10 +32,118 @@ opencode / Claude Code / pi — and drivable directly via the `vtai` CLI.
 - **Audit**: every allow and deny is logged to SQLite in `data_dir`, each
   invocation (orchestrated, MCP, or CLI) attributed to a run row.
 
-## Use
+## Quick start
 
-Requires **uv >= 0.13.1** (declared as `[tool.uv] required-version`; the
-lockfile is revision 5).
+### Prerequisites
+
+| | Requirement | Notes |
+|---|---|---|
+| **OS** | Linux, macOS, or Windows | all three run in CI (blocking since 0.6.0) |
+| **Python** | 3.14+ | pinned by `.python-version`; `uv` fetches it for you |
+| **uv** | >= 0.13.1 | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| **Planner LLM** | one of: Ollama, any OpenAI-compatible endpoint, or a cloud key | see [Choosing a model](#choosing-a-model) |
+| *rsync* | optional | required by `backup_sync`; without it the tool fails closed |
+| *ffmpeg* | optional | required by `transcode_media` and the voice helpers |
+| *Lemonade Server* | optional | speech in/out for `agent-listen` / `agent-speak` |
+
+### 1. Install
+
+```bash
+git clone https://github.com/velsrocky/vtai-agent.git
+cd vtai-agent
+uv sync --dev
+```
+
+`uv sync` needs uv >= 0.13.1 (the lockfile is `revision = 5`; the floor is
+declared as `[tool.uv] required-version`, so an older uv says so plainly
+instead of failing on a lockfile parse).
+
+### 2. Configure
+
+The agent reads one TOML file. **Which** one is resolved in this order:
+
+1. `$VT_CONFIG` — explicit override
+2. `config/settings.toml` next to the package (i.e. the clone you just made)
+3. `~/.vtaiagent/settings.toml` — the per-user file
+
+A fresh clone contains the **maintainer's** config (their provider, their
+writable roots), so point the agent at your own file instead of editing the
+tracked one:
+
+```bash
+export VT_CONFIG="$HOME/.vtaiagent/settings.toml"
+uv run vtai init          # writes a starter config there + creates the dirs
+```
+
+Put that `export` in your shell profile so every later command (and the MCP
+server) picks it up.
+
+`vtai init` creates `~/.vtaiagent` (audit DB + data dir), `~/Downloads`, and
+`~/Documents/vt-data`, and writes a starter config with safe defaults:
+`dry_run_default = true`, `deny_globs` for `~/.ssh`, `~/.gnupg`, `~/.aws` and
+`**/.env`, and writable roots limited to `~/Downloads`, `~/Documents/vt-data`
+and `~/.vtaiagent/tmp`. It is safe to re-run.
+
+Check which config you ended up with — `vtai info` names the file and its
+origin:
+
+```bash
+uv run vtai info
+#   config file     : /Users/you/.vtaiagent/settings.toml (user-level)
+```
+
+<details>
+<summary>Alternative: keep the checkout's config and override with env vars</summary>
+
+A `.env` file (gitignored; copy `.env.example`) in the working directory
+overrides any setting, using the `VT_` prefix with `__` for nesting:
+
+```bash
+VT_LOCAL__BASE_URL=http://localhost:13305/api/v1
+VT_LOCAL__MODEL=<a pulled chat model>
+VT_ACTIVE_PROVIDER=local
+```
+
+This is how a machine with no Ollama points the agent at a Lemonade server
+instead. The `.env` is read from the **current working directory**, so run
+the CLI from the checkout, or export the variables in your shell.
+</details>
+
+### Choosing a model
+
+The planner/judge model comes from `active_provider`:
+
+- `local` — any OpenAI-compatible endpoint: Ollama (`http://localhost:11434/v1`),
+  llama.cpp, vLLM, LM Studio, Lemonade. No API key.
+- `anthropic` / `openai` — cloud models; put `ANTHROPIC_API_KEY` or
+  `OPENAI_API_KEY` in `.env`.
+
+Set `cost_per_1k_input` / `cost_per_1k_output` in the provider block to make
+`budget_usd_per_run` meaningful; without them the agent falls back to the
+model's native price table.
+
+### 3. Verify
+
+```bash
+uv run vtai info                         # config, provider, guardrails
+uv run vtai tools                        # the registered tools
+uv run vtai run system_info              # a read-only call, no LLM involved
+uv run vtai goal --dry-run "list my Downloads"   # full loop with the model
+```
+
+### 4. Use it from your agent CLI
+
+```bash
+scripts/register-mcp.sh                  # opencode (global), claude (user), pi (CLI)
+```
+
+opencode's registration lands in `~/.config/opencode/opencode.jsonc` and
+merges with your existing providers. The script registers an **absolute**
+`uv` path on purpose: a bare `uv` fails with
+`NotFound: ChildProcess.spawn (uv ...)` when the client spawns the server
+from a daemon with a minimal PATH.
+
+### Use
 
 ```bash
 uv sync                                  # install
@@ -46,8 +155,15 @@ uv run vtai run run_shell --params '{"command":"ls ~/Downloads","dry_run":true}'
 scripts/register-mcp.sh                  # register with opencode / claude
 ```
 
+To get the `vtai` CLI outside the checkout, install it as an editable tool so
+it tracks your working copy:
+
+```bash
+uv tool install --editable /path/to/vtai-agent   # -> ~/.local/bin/vtai
+```
+
 Install into another project as a dependency with
-`uv add git+https://github.com/velsrocky/vtai-agent@v0.5.0`, or pull the
+`uv add git+https://github.com/velsrocky/vtai-agent@v0.6.1`, or pull the
 image with `docker build -t vtai-agent .`.
 
 ## HTTP transport
@@ -65,14 +181,24 @@ uv run pytest tests/ -v
 uv run ruff check src/ tests/
 ```
 
-Config lives in `config/settings.toml`; env overrides use the `VT_` prefix
-with `__` nesting (e.g. `VT_GUARDRAILS__DRY_RUN_DEFAULT=false`). On a Mac
-without Ollama, point the local provider at Lemonade instead via a
-gitignored machine-local `.env`:
-`VT_LOCAL__BASE_URL=http://localhost:13305/api/v1` plus
-`VT_LOCAL__MODEL=<a pulled chat model>`. Config is
-validated at startup (`validate_settings`) — a bad `deny_globs` pattern or a
-missing writable root fails fast, not mid-run.
+The config file is resolved as described in [Configure](#2-configure): `$VT_CONFIG`
+→ the checkout's `config/settings.toml` → `~/.vtaiagent/settings.toml`. Env
+overrides use the `VT_` prefix with `__` nesting (e.g.
+`VT_GUARDRAILS__DRY_RUN_DEFAULT=false`). Config is validated at startup
+(`validate_settings`) — a bad `deny_globs` pattern or a missing writable root
+fails fast, not mid-run.
+
+**Windows:** the shell sandbox needs the allowlisted binaries to resolve, and a
+fresh Windows runner does not put Git for Windows' coreutils on PATH. Install
+Git for Windows and prepend its `usr\bin` (this is what CI does):
+
+```powershell
+Add-Content $env:GITHUB_PATH "C:\Program Files\Git\usr\bin"   # CI
+# locally: add "C:\Program Files\Git\usr\bin" to your PATH
+```
+
+Everything else (install, config, MCP registration) is the same on all three
+platforms.
 
 ## Orchestrator
 
@@ -192,8 +318,8 @@ Cross-platform notes (verified on macOS 27/ARM, 2026-10-12):
 - macOS mic selection: avfoundation device indexes vary per machine — list
   them with `ffmpeg -f avfoundation -list_devices true -i ""` and override
   via `AGENT_LISTEN_FF_INPUT` (default audio-only `-f avfoundation -i ":0"`).
-  Note the Mac mini has no built-in microphone; an external/USB device must
-  be present, otherwise recording yields silence (exit 6, no speech).
+  Machines with no built-in microphone (many mini PCs) need an external/USB
+  device attached, otherwise recording yields silence (exit 6, no speech).
 - Playback tries `ffplay` → `afplay` (macOS) → `mpg123` → `aplay` in order.
 - The ALSA mic-level fix and `vtai-audio-fix` systemd unit below are
   Linux-specific; Windows and macOS handle this in System Settings.
@@ -211,8 +337,28 @@ Cross-platform notes (verified on macOS 27/ARM, 2026-10-12):
 
 ### Troubleshooting
 
+**Setup and MCP**
+
+- **`opencode mcp list` shows `✗ vtai-agent failed: NotFound: ChildProcess.spawn (uv ...)`**:
+  the client spawned the server with a minimal PATH (daemons give
+  `PATH=/usr/bin:/bin:...`), so a bare `uv` was unresolvable. Re-run
+  `scripts/register-mcp.sh` — it registers the absolute `uv` path — or edit
+  the `mcp.servers.vtai-agent.command` array in your opencode config to the
+  full path of `uv` (`command -v uv`).
+- **`opencode mcp list` says `No MCP servers configured`**: the registration
+  is per-project. Run it from the checkout, or use the global registration
+  `scripts/register-mcp.sh` writes to `~/.config/opencode/opencode.jsonc`.
+- **"config exists: …/config/settings.toml" and your settings are ignored**:
+  the checkout's config wins over `~/.vtaiagent/settings.toml`. Set
+  `VT_CONFIG="$HOME/.vtaiagent/settings.toml"` and re-run `vtai init`;
+  `vtai info` prints the file in use and where it came from.
+- **`uv sync` fails with `Required uv version ... does not match`**: install
+  uv >= 0.13.1 (the lockfile is revision 5).
+
+**Voice (Linux / PipeWire / ALSA)**
+
 - **Mic produces silence or clipped garbage transcripts**: the internal mic
-  boost is pinned too high and clips the ALC294 input. Fix (also applied at
+  boost is pinned too high and clips the input. Fix (also applied at
   every login via `~/.config/systemd/user/vtai-audio-fix.service`):
 
   ```bash
@@ -234,6 +380,8 @@ Cross-platform notes (verified on macOS 27/ARM, 2026-10-12):
   `arecord -d 3 -f cd /tmp/t.wav` and inspect the peak; near 0 means the
   selected route carries no signal, full-scale means clipping (lower the
   boost).
+
+**Delegate coding**
 
 - **Files changed via `delegate_coding` are still sitting in the repo**: that
   is a pending approval — the changes are kept for your review until you run

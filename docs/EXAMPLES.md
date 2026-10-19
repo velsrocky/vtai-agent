@@ -1,8 +1,9 @@
 # Usage Examples
 
-All examples use the seven registered tools: `system_info`, `run_shell`,
+All examples use the eight registered tools: `system_info`, `run_shell`,
 `organize_files`, `backup_sync`, `transcode_media`, `disk_audit`,
-`delegate_coding`. Anything not allowlisted is denied — and audited.
+`delegate_coding`, `auto_mode`. Anything not allowlisted is denied — and
+audited.
 
 ## Goals (orchestrated, natural language)
 
@@ -53,12 +54,49 @@ rollback result lands in the audit log. Verify commands go through the same
 sandbox as `run_shell` — `pytest` is allowlisted out of the box; anything else
 needs an entry in `shell_allowlist` + `shell_extra_modes`.
 
-`require_approval` defaults to `true`: interactive runs show `git diff --stat`
-and ask before keeping changes, while non-interactive runs roll back and report
-`needs_approval`. Pass `"require_approval": false` to keep edits automatically
-after verification passes. Also note `cli: "pi"` only works when pi has an
-authenticated provider (`pi auth check`); otherwise it returns a failure
-complaining the delegate applied no changes.
+`require_approval` defaults to `true`:
+
+- **Interactive** runs show `git diff --stat` and ask before keeping changes.
+- **Non-interactive** runs (MCP, scripted, orchestrated) keep the changes in
+  the worktree and record a *pending approval*; the run reports failure
+  ("changes kept for review") so automated loops stop. Resolve it with
+  `vtai approve <id>` (keep) or `vtai approve <id> --rollback` (discard).
+  While a pending approval exists for a repo, `delegate_coding` refuses new
+  work there — even with `require_approval: false`.
+
+Pass `"require_approval": false` only for tasks a human has already reviewed.
+Also note `cli: "pi"` only works when pi has an authenticated provider
+(`pi auth check`); otherwise it returns a failure complaining the delegate
+applied no changes.
+
+```bash
+uv run vtai approve              # list pending approvals
+uv run vtai approve 7            # keep the pending diff
+uv run vtai approve 7 --rollback  # discard it
+```
+
+## Auto mode (goal in, reviewed iterations)
+
+```bash
+uv run vtai run auto_mode --params '{
+  "goal": "add a unit test for parser.py",
+  "working_dir": "~/projects/myapp",
+  "cli": "opencode",
+  "max_iterations": 3,
+  "dry_run": true
+}'
+```
+
+A coding CLI gets the goal, a judge model reviews the reply against the
+goal, and an insufficient reply triggers a corrective follow-up — up to
+`max_iterations`. The judge accepts only a bare `OK` as satisfied. Spend is
+metered against `guardrails.budget_usd_per_run`: the judge's calls always,
+the delegate CLI when it reports it (`claude -p --output-format json` exposes
+`total_cost_usd`; `opencode`/`pi` report no headless cost and are labelled
+`"cli_usd": "unmeasured"`).
+
+From inside opencode or Claude Code, start your prompt with
+`@vt-ai_automode_on` and the MCP server routes it to this tool.
 
 ## What gets denied
 

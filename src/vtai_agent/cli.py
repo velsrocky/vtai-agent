@@ -139,11 +139,21 @@ def cmd_init(args) -> int:
     and the data dir, then validate. Safe to re-run."""
     from pathlib import Path
 
-    from .config import CONFIG_TOML, Settings, validate_settings
+    from .config import CONFIG_TOML, Settings, config_source, validate_settings
 
     rc = 0
     if CONFIG_TOML.exists() and not args.force:
         print(f"config exists: {CONFIG_TOML} (use --force to regenerate)")
+        if config_source() == "repo-adjacent":
+            # The checked-in config belongs to the checkout, not the user.
+            # Point at the per-user alternative instead of overwriting a
+            # tracked file with a starter config.
+            print(
+                "  note: this is the checkout's own config/settings.toml.\n"
+                "        For your own settings, keep it untouched and use:\n"
+                "          export VT_CONFIG=\"$HOME/.vtaiagent/settings.toml\"\n"
+                "          vtai init        # writes a starter config there\n"
+            )
         try:
             validate_settings(Settings())
             print("config validates OK")
@@ -172,7 +182,10 @@ def cmd_init(args) -> int:
 
 def cmd_info(_args) -> int:
     s = get_settings()
+    from .config import CONFIG_TOML, config_source
+
     print(f"VT-AIAgent v{__version__}")
+    print(f"  config file     : {CONFIG_TOML} ({config_source()})")
     print(f"  active provider : {describe_active(s)}")
     print(f"  data dir        : {s.paths.data_dir}")
     print(f"  writable roots  : {[str(p) for p in s.paths.writable_roots]}")
