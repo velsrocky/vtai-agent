@@ -11,11 +11,24 @@ if [ "${#TEXT}" -gt 4000 ]; then
 fi
 TMP="$(mktemp "${TMPDIR:-/tmp}/agent-speak.XXXXXX.mp3")"
 trap 'rm -f "$TMP"' EXIT
+# On Windows `python3` can be a Microsoft Store stub that exits without
+# producing output, so sanity-check and fall back: python3 -> python -> py.
+MED_PY=""
+for cand in python3 python py; do
+  if command -v "$cand" >/dev/null 2>&1 \
+     && "$cand" -c "import sys,json" >/dev/null 2>&1; then
+    MED_PY="$cand"; break
+  fi
+done
+if [ -z "$MED_PY" ]; then
+  echo "agent-speak: need a working python on PATH (python3, python, or py)" >&2
+  exit 1
+fi
 ok=0
 for attempt in 1 2 3; do
   curl -sf --max-time 60 -X POST "$BASE/v1/audio/speech" \
     -H "Content-Type: application/json" \
-    -d "$(python3 -c 'import json,sys;print(json.dumps({"model":sys.argv[1],"input":sys.argv[2],"voice":"shimmer"}))' "$TTS_MODEL" "$TEXT")" \
+    -d "$("$MED_PY" -c 'import json,sys;print(json.dumps({"model":sys.argv[1],"input":sys.argv[2],"voice":"shimmer"}))' "$TTS_MODEL" "$TEXT")" \
     -o "$TMP" && ok=1 && break
   echo "agent-speak: TTS request failed (attempt $attempt/3)" >&2
   sleep 1

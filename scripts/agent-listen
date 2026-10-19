@@ -12,6 +12,21 @@ done
 if ! [[ "$SECONDS_TO_RECORD" =~ ^[0-9]+$ ]] || [ "$SECONDS_TO_RECORD" -lt 1 ] || [ "$SECONDS_TO_RECORD" -gt 600 ]; then
   echo "agent-listen: --seconds must be an integer between 1 and 600 (got '${SECONDS_TO_RECORD}')" >&2; exit 2
 fi
+# A real interpreter is required for the level meter and the response
+# parser. On Windows `python3` can be a Microsoft Store stub that exits
+# without reading stdin (breaking the tee meter pipeline), so sanity-check
+# each candidate and fall back: python3 -> python -> py.
+MED_PY=""
+for cand in python3 python py; do
+  if command -v "$cand" >/dev/null 2>&1 \
+     && "$cand" -c "import sys,struct" >/dev/null 2>&1; then
+    MED_PY="$cand"; break
+  fi
+done
+if [ -z "$MED_PY" ]; then
+  echo "agent-listen: need a working python on PATH (python3, python, or py)" >&2
+  exit 1
+fi
 BASE="${LEMONADE_BASE_URL:-http://localhost:13305}"
 STT_MODEL="${LEMONADE_STT_MODEL:-Whisper-Tiny}"
 WAV="$(mktemp "${TMPDIR:-/tmp}/agent-listen.XXXXXX.wav")"
@@ -33,7 +48,7 @@ while time.time()<end:
 sys.stdout.write("\n")'
 record_ok=0
 if [ "$VAD" = 1 ] && command -v arecord >/dev/null 2>&1; then
-  python3 - "$SECONDS_TO_RECORD" > "$WAV" <<'VADPY'
+  "$MED_PY" - "$SECONDS_TO_RECORD" > "$WAV" <<'VADPY'
 import math, struct, subprocess, sys, time
 maxlen = float(sys.argv[1]) * 16000 * 2
 proc = subprocess.Popen(
@@ -74,7 +89,7 @@ sys.stdout.buffer.write(header + buf)
 VADPY
   record_ok=1
 elif command -v arecord >/dev/null 2>&1; then
-  arecord -q -d "$SECONDS_TO_RECORD" -r 16000 -c 1 -f S16_LE -t wav | tee "$WAV" | python3 -u -c "$METER" "$SECONDS_TO_RECORD" >&2 && record_ok=1 || true
+  arecord -q -d "$SECONDS_TO_RECORD" -r 16000 -c 1 -f S16_LE -t wav | tee "$WAV" | "$MED_PY" -u -c "$METER" "$SECONDS_TO_RECORD" >&2 && record_ok=1 || true
 elif command -v ffmpeg >/dev/null 2>&1; then
   # AGENT_LISTEN_FF_INPUT overrides the capture input (device indexes vary
   # per machine; list them with `ffmpeg -f avfoundation -list_devices true -i ""`).
@@ -82,19 +97,32 @@ elif command -v ffmpeg >/dev/null 2>&1; then
   # the input spec so no quote juggling is needed on expansion.
   case "$(uname -s)" in
     Darwin) FF_IN=(-f avfoundation -i ":0") ;;
-    MINGW*|MSYS*|CYGWIN*) FF_IN=(-f dshow -i audio=Microphone) ;;
+    MINGW*|MSYS*|CYGWIN*)
+      if [ -n "${AGENT_LISTEN_FF_INPUT:-}" ]; then
+        FF_IN=(-f dshow -i "$AGENT_LISTEN_FF_INPUT")
+      elif command -v ffmpeg >/dev/null 2>&1; then
+        # Windows dshow needs the exact device name (partial names are not
+        # matched), and names contain spaces — so auto-pick the first audio
+        # capture device and keep `-i audio=<name>` as ONE arg.
+        d="$(ffmpeg -hide_banner -f dshow -list_devices true -i dummy 2>&1 \
+              | grep -m1 '(audio)' | sed 's/^\[[^]]*\] "\([^"]*\)".*/\1/')"
+        FF_IN=(-f dshow -i "audio=$d")
+      else
+        FF_IN=(-f dshow -i "audio=Microphone")
+      fi
+      ;;
     *) FF_IN=(-f pulse -i default) ;;
   esac
-  if [ -n "${AGENT_LISTEN_FF_INPUT:-}" ]; then
-    # Word-split is intentional here: the override is a plain flag string.
-    # shellcheck disable=SC2206
+  if [ -n "${AGENT_LISTEN_FF_INPUT:-}" ] \
+     && [[ "${FF_IN[0]}" == "-f" ]] && [[ "${FF_IN[1]}" != dshow ]]; then
+    # Non-dshow overrides keep the original word-split flag-string semantics.
     FF_IN=($AGENT_LISTEN_FF_INPUT)
   fi
   # The level meter exits after N seconds, closing the pipe while ffmpeg is
   # still writing: under `set -o pipefail` that reads as failure, so success
   # is judged by the captured file, not the pipeline status.
   ffmpeg -hide_banner -nostdin -loglevel error "${FF_IN[@]}" -t "$SECONDS_TO_RECORD" -ar 16000 -ac 1 -f wav pipe:1 2>/dev/null \
-    | tee "$WAV" | python3 -u -c "$METER" "$SECONDS_TO_RECORD" >&2 || true
+    | tee "$WAV" | "$MED_PY" -u -c "$METER" "$SECONDS_TO_RECORD" >&2 || true
   [ -s "$WAV" ] && record_ok=1
 else
   echo "agent-listen: need arecord or ffmpeg" >&2; exit 1
@@ -111,7 +139,7 @@ done
 if [ -z "${resp:-}" ]; then
   echo "agent-listen: STT server unreachable at $BASE" >&2; exit 4
 fi
-python3 - "$resp" <<'PY'
+"$MED_PY" - "$resp" <<'PY'
 import json, sys
 try:
     data = json.loads(sys.argv[1])
