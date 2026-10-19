@@ -87,6 +87,18 @@ Known facts:
   config/settings.toml is the Linux box's production config — never
   regenerate it from this machine; the Windows config is
   ~/.vtaiagent/settings.toml.
+- Mac (2026-10-20): `vtai` is on PATH via `uv tool install --editable` (tracks
+  the checkout). This Mac's personal config is ~/.vtaiagent/settings.toml —
+  point VT_CONFIG at it; the repo's config/settings.toml is the Linux box's.
+- Daemon PATH gotcha (2026-10-20): a service started by launchd/systemd gets
+  PATH=/usr/bin:/bin:..., so the MCP server must be registered with an
+  ABSOLUTE uv path (register-mcp.sh does this) or it dies with
+  "NotFound: ChildProcess.spawn (uv ...)".
+- Never use `launchctl submit` for one-shot background work: submitted jobs
+  carry KeepAlive and respawn forever (it caused an opencode service restart
+  loop). Use a detached `subprocess.Popen(..., start_new_session=True)`.
+- The repo lockfile is uv revision 5 (needs uv >= 0.13.1) — the Linux box
+  needs `uv self update` before `uv sync` will work there.
 
 Rules:
 
