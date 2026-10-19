@@ -7,6 +7,7 @@ quoting the gap and the previous attempt → repeat, bounded.
 """
 
 import asyncio
+import json
 import shutil
 from pathlib import Path
 
@@ -29,8 +30,18 @@ is missing, wrong, or unverified>.
 # Judge call policy: local models hang or flake, so bound each attempt and
 # retry once before failing closed. Both are deliberately small: an
 # unverifiable reply must stop the loop fast, not burn max_iterations.
+# Judge spend is metered against guardrails.budget_usd_per_run the same way
+# orchestrated steps are — combined with the delegated CLI's reported cost
+# (claude reports total_cost_usd; see _CLI_COST_CAPABLE).
 _JUDGE_ATTEMPTS = 2
 _JUDGE_TIMEOUT = 120.0
+
+# Coding CLIs that can report their own headless spend. Verified per vendor
+# docs 2026-10-19:
+#   claude:  `claude -p --output-format json` -> total_cost_usd
+#   opencode/pi: no cost field in headless output — their spend is bounded
+#     by max_iterations/timeout and labeled "unmeasured" in run details.
+_CLI_COST_CAPABLE = frozenset({"claude"})
 
 
 class AutoModeInput(BaseModel):
@@ -79,33 +90,63 @@ class AutoModeTool(Tool[AutoModeInput]):
         prompt = inp.goal
         history: list[dict] = []
         last_reply = ""
+        budget = self.settings.guardrails.budget_usd_per_run
+        cli_spent = 0.0
         for i in range(1, inp.max_iterations + 1):
             db.audit(run_id, "auto_mode", f"iteration {i}: dispatching to {inp.cli}",
                      allowed=True)
             try:
-                last_reply = await self._ask_cli(binary, inp.cli, prompt, work, inp.timeout)
+                last_reply, cli_cost = await self._ask_cli(
+                    binary, inp.cli, prompt, work, inp.timeout)
             except asyncio.TimeoutError:
                 return ToolResult(ok=False, summary=f"{inp.cli} timed out on iteration {i}",
                                   detail={**plan, "history": history, "iteration": i})
-            verdict, critique = await self._judge(inp.goal, last_reply)
-            history.append({"iteration": i, "prompt": prompt[:2000],
-                            "reply": last_reply[-2000:], "verdict": verdict,
-                            "critique": critique[:1000]})
+            # Spend attribution: a CLI that can report its own spend but
+            # yields no readable report must not be treated as free.
+            if inp.cli in _CLI_COST_CAPABLE and cli_cost is None:
+                return ToolResult(
+                    ok=False,
+                    summary=(
+                        f"cannot verify {inp.cli} spend: its headless output did "
+                        "not include total_cost_usd (update the CLI, or use a "
+                        "CLI that reports its spend: opencode/pi, or set a local "
+                        "provider). Refusing an unverifiable paid spend."),
+                    detail={**plan, "history": history, "iteration": i,
+                            "spend": {"cli_usd": None, "budget": budget}},
+                )
+            cli_spent += cli_cost or 0.0
+            if cli_spent > budget:
+                return ToolResult(
+                    ok=False,
+                    summary=(f"auto_mode budget (${budget:.2f}) exceeded: {inp.cli} "
+                             f"has already spent ${cli_spent:.4f} by iteration {i}."),
+                    detail={**plan, "history": history, "iteration": i,
+                            "spend": {"cli_usd": cli_spent, "budget": budget}},
+                )
+            verdict, critique = await self._judge(
+                inp.goal, last_reply, budget_remaining=budget - cli_spent)
+            # The judge itself is down: no reply can be verified, so stop
+            # instead of looping blindly or declaring success.
             if verdict == "error":
-                # The judge itself is down: no reply can be verified, so stop
-                # instead of looping blindly or declaring success.
                 return ToolResult(
                     ok=False,
                     summary=f"cannot verify goal: {critique}",
                     detail={**plan, "iterations": i, "history": history,
-                            "final_answer": last_reply[-4000:]},
+                            "final_answer": last_reply[-4000:],
+                            "spend": {"cli_usd": cli_spent, "budget": budget}},
                 )
+            history.append({"iteration": i, "prompt": prompt[:2000],
+                            "reply": last_reply[-2000:], "verdict": verdict,
+                            "critique": critique[:1000],
+                            "cli_cost_usd": cli_cost})
             if verdict == "ok":
                 return ToolResult(
                     ok=True,
                     summary=f"Goal satisfied after {i} iteration(s) via {inp.cli}",
                     detail={**plan, "iterations": i, "final_answer": last_reply[-4000:],
-                            "history": history},
+                            "history": history,
+                            "spend": {"cli_usd": cli_spent if cli_cost is not None
+                                      else "unmeasured", "budget": budget}},
                 )
             prompt = (
                 "The previous answer did not satisfy the goal.\n\n"
@@ -118,20 +159,29 @@ class AutoModeTool(Tool[AutoModeInput]):
             ok=False,
             summary=f"Not satisfied after {inp.max_iterations} iteration(s) via {inp.cli}",
             detail={**plan, "iterations": inp.max_iterations,
-                    "final_answer": last_reply[-4000:], "history": history},
+                    "final_answer": last_reply[-4000:], "history": history,
+                    "spend": {"cli_usd": cli_spent, "budget": budget}},
         )
 
-    async def _ask_cli(self, binary: str, cli: str, prompt: str, cwd: Path,
-                       timeout: float) -> str:
+    @staticmethod
+    def _cli_argv(cli: str, prompt: str) -> list[str]:
         if cli == "opencode":
             # opencode v2 `run` takes the message positionally and operates in
             # cwd (already set below); it has no --dir flag — an unknown flag
             # makes it print help and exit non-zero.
-            argv = ["opencode", "run", prompt]
-        elif cli == "claude":
-            argv = ["claude", "-p", prompt]
-        else:
-            argv = ["pi", "-p", "--approve", prompt]
+            return ["opencode", "run", prompt]
+        if cli == "claude":
+            # JSON output: the reply is obj["result"] and the spend is
+            # obj["total_cost_usd"] — metered against budget_usd_per_run
+            # unless the report is unreadable (then auto_mode fails closed).
+            return ["claude", "-p", "--output-format", "json", prompt]
+        return ["pi", "-p", "--approve", prompt]
+
+    async def _ask_cli(self, binary: str, cli: str, prompt: str, cwd: Path,
+                       timeout: float) -> tuple[str, float | None]:
+        """Dispatch one headless CLI turn. Returns (reply, reported_cost_usd);
+        reported_cost_usd is None for CLIs without a cost report."""
+        argv = self._cli_argv(cli, prompt)
         proc = await asyncio.create_subprocess_exec(
             *argv, cwd=str(cwd),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -150,18 +200,32 @@ class AutoModeTool(Tool[AutoModeInput]):
             # Returning that text as a "reply" would let the judge approve it.
             raise ToolError(f"{cli} exited {proc.returncode}: "
                             f"{(text or err)[-500:]}")
-        return text
+        if cli == "claude":
+            try:
+                obj = json.loads(text)
+                reply = str(obj.get("result", ""))
+                raw = obj.get("total_cost_usd")
+                cost = float(raw) if isinstance(raw, (int, float)) else None
+            except json.JSONDecodeError:
+                return "", None
+            return reply, cost
+        return text, None
 
-    async def _judge(self, goal: str, reply: str) -> tuple[str, str]:
+    async def _judge(self, goal: str, reply: str,
+                     budget_remaining: float | None = None) -> tuple[str, str]:
         from pydantic_ai import Agent
 
-        from ..providers import build_model
+        from ..providers import build_model, estimate_cost
         try:
             model = self._model if self._model is not None else build_model(self.settings)
             agent = Agent(model=model, system_prompt=_JUDGE_SYSTEM, retries=1)
         except Exception as e:
             # Misconfigured/unavailable provider: no reply can be verified.
             return "error", f"judge unavailable: {type(e).__name__}: {e}"
+        budget = (self.settings.guardrails.budget_usd_per_run
+                  if budget_remaining is None else budget_remaining)
+        budget = self.settings.guardrails.budget_usd_per_run
+        spent = 0.0
         last_error: Exception | None = None
         for _ in range(_JUDGE_ATTEMPTS):
             try:
@@ -174,8 +238,26 @@ class AutoModeTool(Tool[AutoModeInput]):
                 # before giving up on verification.
                 last_error = e
                 continue
+            # Same fail-closed policy as the orchestrator: a paid judge step
+            # whose spend cannot be verified is never treated as free.
+            usage = getattr(result, "usage", None)
+            est = estimate_cost(self.settings, usage) if usage is not None else None
+            if est is None and self.settings.active_provider != "local":
+                return "error", (
+                    f"cannot verify judge spend for provider "
+                    f"'{self.settings.active_provider}'; set cost_per_1k_* "
+                    "in config. Refusing to review on an unverifiable spend.")
+            spent += est or 0.0
+            if spent > budget:
+                return "error", (
+                    f"judge budget exceeded: ${spent:.4f} of "
+                    f"${budget:.2f} (guardrails.budget_usd_per_run)")
             text = str(result.output).strip()
-            if text.upper().startswith("OK"):
+            # Strict verdict token: only a bare "OK" (trailing period allowed)
+            # means satisfied. "OKay, mostly..." or "OK, but ..." must count
+            # as insufficient — a prefix match would let hedge replies pass
+            # an unattended review.
+            if text.upper().rstrip(".") == "OK":
                 return "ok", ""
             critique = text.split(":", 1)[1].strip() if ":" in text else text
             return "insufficient", critique or "reply did not satisfy the goal"

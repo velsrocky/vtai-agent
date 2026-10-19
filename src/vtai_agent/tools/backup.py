@@ -8,13 +8,14 @@ rsync-based incremental backup with verification. Safety posture:
 
 import asyncio
 import re
+import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from .. import db
 from ..guardrails import Guardrails
-from .registry import Tool, ToolResult
+from .registry import Tool, ToolError, ToolResult
 
 _SUMMARY_RE = re.compile(
     r"Number of files: (?P<files>[\d,]+).*?"
@@ -102,13 +103,22 @@ class BackupSyncTool(Tool[BackupSyncInput]):
         return ToolResult(ok=True, summary=summary, detail=detail, dry_run=dry_run)
 
     async def _run(self, argv: list[str]) -> str:
+        # Resolve the binary explicitly: a missing rsync must be a clear
+        # ToolError (including in dry runs — the itemized plan IS the rsync
+        # output), never an unhandled CreateProcess crash.
+        rsync = shutil.which(argv[0])
+        if rsync is None:
+            raise ToolError(f"{argv[0]} is not installed on this machine; "
+                            "backup_sync requires it")
         try:
             proc = await asyncio.create_subprocess_exec(
-                *argv,
+                rsync, *argv[1:],
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=3600)
+        except FileNotFoundError as e:
+            raise ToolError(f"{argv[0]} disappeared from PATH: {e}") from e
         except asyncio.TimeoutError:
             raise TimeoutError("rsync exceeded 1h; aborted")
         text = out.decode(errors="replace")

@@ -41,6 +41,9 @@ def reset_current_run(token: contextvars.Token) -> None:
 
 TRUSTED_BIN_DIRS: tuple[str, ...] = ("/usr/bin", "/bin", "/usr/local/bin")
 
+# Quote characters stripped from shlex(posix=False) tokens on Windows.
+QUOTES = "\"'"
+
 # Commands that take no interesting arguments (read-only system info).
 SHELL_MODE_NONE = frozenset({"df", "free", "nproc", "uptime", "rocm-smi", "vulkaninfo", "vm_stat"})
 # Commands whose path arguments are read-only: deny-globs still apply.
@@ -119,7 +122,6 @@ class Guardrails:
                 note = self._deny_action("access", s, f"matches deny glob {pat}")
                 raise GuardrailViolation(
                     f"Protected path: {p}" + (f" — {note}" if note else ""))
-
     def is_denied(self, path: str | Path) -> bool:
         """Non-raising check used to filter scan results out of reports."""
         try:
@@ -134,7 +136,8 @@ class Guardrails:
     @staticmethod
     def _within_literal_prefix(path_str: str, pattern: str) -> bool:
         """Deny `~/.ssh/**` must also protect `~/.ssh` itself, not just children."""
-        prefix = pattern.split("*", 1)[0].rstrip("/")
+        prefix = pattern.split("*", 1)[0]
+        prefix = prefix.rstrip("/\\")
         if not prefix:
             return False
         return path_str == prefix or path_str.startswith(prefix + os.sep)
@@ -157,14 +160,22 @@ class Guardrails:
         """Validate a command. Relative path arguments are resolved against
         base_dir (where the command will actually run), not the agent's cwd."""
         try:
-            argv = shlex.split(command)
+            # POSIX mode eats backslashes (C:\Users\rocky -> CUsersrocky),
+            # mangling every Windows path *before* the deny/writable checks
+            # could see it. Raw mode preserves them; we strip quotes instead.
+            if os.name == "nt":
+                argv = shlex.split(command, posix=False)
+                argv = [a[1:-1] if len(a) > 1 and a[0] == a[-1] and a[0] in QUOTES else a
+                        for a in argv]
+            else:
+                argv = shlex.split(command)
         except ValueError as e:
             return self._reject_shell([], command, f"unparseable: {e}")
         if not argv:
             return self._reject_shell([], command, "empty command")
 
         binary = argv[0]
-        if os.sep in binary:
+        if os.sep in binary or "/" in binary:
             return self._reject_shell(argv, command,
                                       f"binary must be a bare name, not a path: {binary}")
         if binary not in self.cfg.shell_allowlist:
@@ -263,7 +274,8 @@ class Guardrails:
 
     @staticmethod
     def _looks_like_path(arg: str, base_dir: str | Path | None = None) -> bool:
-        if "/" in arg or arg.startswith("~"):
+        if "/" in arg or "\\" in arg or arg.startswith("~") \
+                or (len(arg) > 1 and arg[1] == ":"):
             return True
         return Guardrails._anchored(arg, base_dir).exists()
 

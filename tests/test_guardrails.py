@@ -1,4 +1,5 @@
 import os
+import sys
 
 import pytest
 
@@ -76,9 +77,12 @@ def test_shell_denies_pathed_binary(g, sandbox):
 def test_shell_denies_untrusted_resolution(g, sandbox, monkeypatch, tmp_path):
     fake = tmp_path / "evilbin"
     fake.mkdir()
-    (fake / "cat").write_text("#!/bin/sh\necho pwned\n")
-    (fake / "cat").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+    # Windows shutil.which() only considers PATHEXT extensions, so the
+    # hijacking binary must carry one there.
+    name = "cat.exe" if sys.platform == "win32" else "cat"
+    (fake / name).write_text("#!/bin/sh\necho pwned\n")
+    (fake / name).chmod(0o755)
+    monkeypatch.setenv("PATH", os.pathsep.join([str(fake), os.environ["PATH"]]))
     d = g.check_shell("cat whatever")
     assert not d.allowed
     assert "trusted dirs" in d.reason
@@ -118,10 +122,13 @@ def test_shell_dangerous_flags(g, sandbox):
 def test_shell_extra_modes_and_base_dir(sandbox, monkeypatch):
     bin_dir = sandbox.tmp / "bin"
     bin_dir.mkdir()
-    fake = bin_dir / "mytool"
-    fake.write_text("#!/bin/sh\nexit 0\n")
-    fake.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    # Windows PATHEXT resolution needs a .bat executable; POSIX uses the
+    # shebang script directly.
+    script = bin_dir / ("mytool.bat" if sys.platform == "win32" else "mytool")
+    script.write_text("@exit 0\n" if sys.platform == "win32" else "#!/bin/sh\nexit 0\n")
+    if sys.platform != "win32":
+        script.chmod(0o755)
+    monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), os.environ["PATH"]]))
     sandbox.cfg.shell_allowlist = [*sandbox.cfg.shell_allowlist, "mytool"]
     sandbox.cfg.shell_extra_modes = {"mytool": "write"}
     sandbox.cfg.trusted_bin_dirs = [*sandbox.cfg.trusted_bin_dirs, str(bin_dir)]
@@ -174,6 +181,7 @@ def test_every_denial_is_audited(g, sandbox):
     assert any("rm -rf /nope" in d for d in details)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="procfs/POSIX path semantics")
 def test_is_denied_unresolvable_path_is_true(g):
     assert g.is_denied("/proc/1/root/../../\x00bad") is True
 

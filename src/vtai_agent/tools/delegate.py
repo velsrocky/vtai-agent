@@ -11,6 +11,7 @@ Safety contract, in order:
 """
 
 import asyncio
+import json
 import shutil
 from pathlib import Path
 
@@ -80,6 +81,19 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
         if not (work / ".git").is_dir():
             raise NotADirectoryError(f"not a git repo (no .git): {work}")
 
+        # An unresolved pending approval for this repo is a hard block —
+        # including re-runs that flip require_approval. The agent cannot
+        # bypass its own approval gate; the human resolves it via `vtai approve`.
+        pending = db.pending_approval_for(str(work))
+        if pending is not None:
+            db.audit(run_id, "approval",
+                     f"block: unresolved pending approval #{pending.id} for {work}",
+                     allowed=False)
+            raise ToolError(
+                f"unresolved approval #{pending.id} awaits a human decision for "
+                f"{work}; run `vtai approve {pending.id}` to keep the changes or "
+                f"`vtai approve {pending.id} --rollback` to discard them first")
+
         plan = {
             "cli": inp.cli, "working_dir": str(work), "timeout": inp.timeout,
             "verify_command": inp.verify_command, "auto_rollback": inp.auto_rollback,
@@ -123,6 +137,21 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
             return ToolResult(ok=False, summary=f"{inp.cli} timed out after {inp.timeout}s; rolled back",
                               detail={**plan, "rolled_back": True, "reason": "timeout"})
 
+        # claude's JSON mode includes the spend; parse it now that it exists
+        # and attach everything to the result dict once it is built below.
+        cli_cost: float | None = None
+        claude_reply = ""
+        claude_cost_note = ""
+        if inp.cli == "claude":
+            try:
+                obj = json.loads(stdout)
+                raw = obj.get("total_cost_usd")
+                if isinstance(raw, (int, float)):
+                    cli_cost = float(raw)
+                claude_reply = str(obj.get("result", ""))[:4000]
+            except json.JSONDecodeError:
+                claude_cost_note = "unparseable headless output"
+
         _, status = await self._git(work, "status", "--porcelain")
         _, diff = await self._git(work, "diff", "--stat")
         # `git diff` never shows untracked files — and a delegate's newest
@@ -135,10 +164,22 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
         result = {
             **plan, "returncode": code, "diff": diff[-4000:],
             "stdout": stdout[-4000:], "stderr": stderr[-2000:],
+            # spend attribution: claude reports its own total_cost_usd;
+            # opencode/pi have no headless cost field — bounded by timeout.
+            "cli_cost_usd": cli_cost if cli_cost is not None else "unmeasured",
         }
-        # A delegate that "succeeds" but produced no changes and emitted a raw
-        # tool-call JSON (pi does this when it has no authenticated provider)
-        # must not be reported as success — fail closed.
+        if inp.cli == "claude":
+            result["claude_reply"] = claude_reply
+        if claude_cost_note:
+            result["claude_cost_report"] = claude_cost_note
+        db.audit(run_id, "delegate",
+                 f"{inp.cli} spend: "
+                 f"{'unmeasured' if cli_cost is None else f'${cli_cost:.4f}'}",
+                 allowed=True)
+        # A delegate that "succeeds" but produced no changes is not a success:
+        # pi emits a raw tool-call JSON when it has no authenticated provider,
+        # and an unchanged tree can also mean the CLI silently did nothing.
+        # Fail closed either way so callers do not proceed on a phantom edit.
         if code == 0 and not diff.strip():
             stripped = stdout.lstrip()
             if stripped.startswith("{") and '"name"' in stripped and '"arguments"' in stripped:
@@ -179,16 +220,44 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
 
         # human approval gate: only accept the diff when a human says so
         if inp.require_approval and code == 0:
-            approved, note = await self._approve(diff, work)
-            result["approval_note"] = note
-            if not approved:
-                await self._restore(work, snapshot, run_id, "human rejected", orig_index)
-                result["rolled_back"] = True
-                result["reason"] = "human did not approve the diff"
+            import sys
+            if sys.stdin.isatty():
+                approved, note = await self._approve(diff, work)
+                result["approval_note"] = note
+                if not approved:
+                    await self._restore(work, snapshot, run_id, "human rejected", orig_index)
+                    result["rolled_back"] = True
+                    result["reason"] = "human did not approve the diff"
+                    return ToolResult(
+                        ok=False,
+                        summary=f"{inp.cli} completed but was not approved; rolled back. "
+                                f"Re-run with require_approval=false to keep changes.",
+                        detail=result,
+                    )
+            else:
+                # Non-interactive (MCP, scripted, orchestrated): no stdin to
+                # prompt. Silently rolling the work back made this gate
+                # entirely unusable from agent sessions, so leave the changes
+                # in the worktree as a pending approval for a human to resolve
+                # via `vtai approve <id> [|--rollback]`. This run reports
+                # failure so automated loops stop instead of proceeding.
+                pa = db.create_pending_approval(
+                    run_id=run_id, cli=inp.cli, prompt=inp.prompt,
+                    working_dir=str(work), snapshot=snapshot,
+                    orig_index=orig_index, diff=diff)
+                db.audit(run_id, "approval",
+                         f"pending #{pa.id}: awaiting human decision "
+                         f"(changes left in {work})", allowed=False)
+                result["needs_approval"] = True
+                result["approval_id"] = pa.id
                 return ToolResult(
                     ok=False,
-                    summary=f"{inp.cli} completed but was not approved; rolled back. "
-                            f"Re-run with require_approval=false to keep changes.",
+                    summary=(
+                        f"{inp.cli} completed; changes kept for review as "
+                        f"pending approval #{pa.id}. Resolve with "
+                        f"`vtai approve {pa.id}` (keep) or "
+                        f"`vtai approve {pa.id} --rollback`. Do not re-run "
+                        "delegate_coding in this directory until resolved."),
                     detail=result,
                 )
 
@@ -202,8 +271,44 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
             detail=result,
         )
 
+    async def resolve_pending(self, approval_id: int, keep: bool) -> ToolResult:
+        """Human resolution of a pending approval: keep the delegate's
+        changes (index handed back to its pre-run staging state) or roll
+        the repo back to the pre-run snapshot."""
+        pa = db.get_pending_approval(approval_id)
+        if pa is None or pa.resolved:
+            return ToolResult(
+                ok=False,
+                summary=f"pending approval #{approval_id} not found or already resolved",
+                detail={"approval_id": approval_id},
+            )
+        work = Path(pa.working_dir)
+        if keep:
+            await self._restore_index(work, pa.orig_index)
+            db.set_pending_resolved(approval_id, keep=True)
+            db.audit(pa.run_id, "approval",
+                     f"pending #{approval_id}: kept by human", allowed=True)
+            return ToolResult(
+                ok=True,
+                summary=f"#{approval_id}: changes kept in {work}",
+                detail={"approval_id": approval_id, "working_dir": pa.working_dir,
+                        "kept": True, "diff": pa.diff[-2000:]},
+            )
+        await self._restore(work, pa.snapshot, pa.run_id,
+                            f"approval #{approval_id} rollback", pa.orig_index)
+        db.set_pending_resolved(approval_id, keep=False)
+        db.audit(pa.run_id, "approval",
+                 f"pending #{approval_id}: rolled back by human", allowed=True)
+        return ToolResult(
+            ok=True,
+            summary=f"#{approval_id}: rolled back {work}",
+            detail={"approval_id": approval_id, "working_dir": pa.working_dir,
+                    "kept": False},
+        )
+
     async def _approve(self, diff_stat: str, work: Path) -> tuple[bool, str]:
         import sys
+
         if not sys.stdin.isatty():
             db.audit(None, "delegate", "approval required but stdin is not a TTY; rolling back",
                      allowed=False)
@@ -222,13 +327,14 @@ class DelegateCodingTool(Tool[DelegateCodingInput]):
             # cwd (set by _run); it has no --dir flag.
             return ["opencode", "run", inp.prompt]
         if binary == "claude":
-            args = ["claude", "-p", inp.prompt]
+            # --output-format json exposes the reply in obj["result"] and the
+            # spend in obj["total_cost_usd"] (captured into cli_cost_usd).
+            args = ["claude", "-p", "--output-format", "json", inp.prompt]
             if inp.skip_permissions:
                 args.append("--dangerously-skip-permissions")
             return args
         # pi: non-interactive print mode
-        args = ["pi", "-p", "--approve", inp.prompt]
-        return args
+        return ["pi", "-p", "--approve", inp.prompt]
 
     async def _run(self, argv: list[str], cwd: Path, timeout: float):
         proc = await asyncio.create_subprocess_exec(

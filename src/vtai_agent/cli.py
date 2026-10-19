@@ -263,6 +263,30 @@ def cmd_goal(args) -> int:
     return 0 if result.status == "ok" else 1
 
 
+def cmd_approve(args) -> int:
+    """Resolve pending delegate_coding approvals."""
+    if args.approval_id is None or args.list:
+        rows = db.list_pending_approvals()
+        if not rows:
+            print("no pending approvals")
+            return 0
+        for pa in rows:
+            created = pa.created_at.strftime("%Y-%m-%d %H:%M") if pa.created_at else "?"
+            print(f"#{pa.id:<4} {created} run={pa.run_id} {pa.cli:<8} "
+                  f"{pa.working_dir}  prompt: {pa.prompt[:60]}")
+        return 0
+
+    from .guardrails import Guardrails
+    from .tools.delegate import DelegateCodingTool
+
+    tool = DelegateCodingTool(Guardrails())
+    result = asyncio.run(tool.resolve_pending(args.approval_id, keep=not args.rollback))
+    print(result.summary)
+    if result.detail.get("diff"):
+        print(f"\n--- kept diff (tail) ---\n{result.detail['diff']}")
+    return 0 if result.ok else 1
+
+
 def cmd_audit(args) -> int:
     from sqlmodel import select
 
@@ -335,6 +359,16 @@ def build_parser() -> argparse.ArgumentParser:
     r2.add_argument("--status", help="ok | failed | aborted | budget_exceeded | running")
     r2.add_argument("--grep", help="Case-insensitive substring on goal")
     r2.set_defaults(func=cmd_runs)
+
+    ap = sub.add_parser("approve",
+                        help="Resolve pending delegate_coding approvals")
+    ap.add_argument("approval_id", nargs="?", type=int, default=None,
+                    help="Pending approval id (see --list)")
+    ap.add_argument("--rollback", action="store_true",
+                    help="Roll the repo back instead of keeping changes")
+    ap.add_argument("--list", action="store_true",
+                    help="List pending approvals")
+    ap.set_defaults(func=cmd_approve)
 
     a = sub.add_parser("audit", help="List recent audit-log entries")
     a.add_argument("--limit", type=int, default=50)

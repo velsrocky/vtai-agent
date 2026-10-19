@@ -141,7 +141,7 @@ def test_auto_mode_stops_when_judge_approves(sandbox, monkeypatch, tmp_path):
     replies = iter(["wrong answer", "correct answer"])
 
     async def fake_cli(self, binary, cli, prompt, cwd, timeout):
-        return next(replies)
+        return next(replies), None
 
     monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
     monkeypatch.setattr(
@@ -159,7 +159,7 @@ def test_auto_mode_gives_up_after_max_iterations(sandbox, monkeypatch):
     from vtai_agent.tools.automode import AutoModeInput, AutoModeTool
 
     async def fake_cli(self, binary, cli, prompt, cwd, timeout):
-        return "still wrong"
+        return "still wrong", None
 
     monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
     monkeypatch.setattr(
@@ -178,7 +178,7 @@ def test_auto_mode_dry_run_does_not_run(sandbox, monkeypatch):
 
     async def fake_cli(self, binary, cli, prompt, cwd, timeout):
         called["n"] += 1
-        return "x"
+        return "x", None
 
     monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
     monkeypatch.setattr(

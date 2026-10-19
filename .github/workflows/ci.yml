@@ -13,9 +13,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+
+      # A fresh Windows runner does not put Git for Windows' coreutils on
+      # PATH (only git.exe and mingw64), but the allowlist-driven sandbox
+      # and the suite assume cat/cp/mkdir/grep/tar resolve somewhere trusted.
+      # Any Git Bash install has them under usr\bin; prepending here mirrors
+      # that documented install so Windows CI tests the real sandbox paths.
+      - name: Add Git Bash coreutils to PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH "C:\Program Files\Git\usr\bin"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3

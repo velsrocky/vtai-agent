@@ -76,11 +76,14 @@ missing writable root fails fast, not mid-run.
 `vtai goal` runs a bounded ReAct-style agent loop. Each step the model
 either emits one fenced-JSON tool call (parsed, guarded, executed, result fed
 back) or a final natural-language answer. Bounds enforced every step:
-`max_steps`, kill switch, and `budget_usd_per_run`. The run's dry-run mode is
+`max_steps`, kill switch, and `budget_usd_per_run`. A lonely `dry_run: true`
+text blob that fails to parse or misses its `tool` key is retried with a
+corrective note instead of ending the run as "success"; the run mode is
 authoritative — the model cannot override it — and every tool call is
 persisted as a `Step` row and audit entry. If a paid provider's spend can't
 be determined (no `cost_per_1k_*` config and no native cost), the run fails
-closed rather than reporting free.
+closed rather than reporting free. The system prompt describes the machine's
+actual OS.
 
 We use a text protocol rather than native function-calling on purpose: the
 local Ollama models on this box emit tool calls as raw JSON text even when
@@ -92,7 +95,15 @@ so the text protocol behaves identically across local and cloud providers.
 `auto_mode` runs the loop you describe: it dispatches the goal to a coding
 CLI (opencode by default), reviews the reply against the goal with the
 configured model, and if the reply is insufficient, sends a follow-up prompt
-quoting the critique — up to `max_iterations`. From inside opencode or
+quoting the critique — up to `max_iterations`. The judge only accepts a bare
+`OK` as satisfied (hedged replies fail). Spend is metered against
+`guardrails.budget_usd_per_run` and attributed in the run's `spend` detail:
+the judge's own LLM calls always; the delegate CLI when it can report it —
+`claude -p --output-format json` exposes `total_cost_usd`, and an unreadable
+report from a cost-capable CLI fails closed. `opencode`/`pi` report no
+headless spend (documented vendor behavior, not guess-parsed event streams),
+so their runs carry `"cli_usd": "unmeasured"` and stay bounded only by
+`max_iterations`/`timeout`. From inside opencode or
 Claude Code, start the prompt with `@vt-ai_automode_on`: the MCP server's
 instructions route that to the tool.
 
@@ -104,16 +115,31 @@ uv run vtai run auto_mode --params '{"goal":"add a unit test for parser.py","wor
 
 `delegate_coding` snapshots the target repo, runs the chosen CLI headlessly,
 captures the diff, and on `verify_command` failure (or timeout / non-zero
-exit) rolls back. Two extra guards worth knowing:
+exit) rolls back. Three guards worth knowing:
 
 - **Human approval gate**: `require_approval` defaults to `true`. Interactively
-  it shows `git diff --stat` and asks before keeping changes; non-interactive
-  runs (MCP, scripted) roll back instead of keeping edits. Pass
-  `"require_approval": false` only when a human has already reviewed the plan.
+  it shows `git diff --stat` and asks before keeping changes. Non-interactive
+  runs (MCP, scripted, orchestrated) keep the changes in the worktree as a
+  **pending approval** — the run reports failure so automated loops stop — and
+  `vtai approve <id>` (keep) or `vtai approve <id> --rollback` resolves it.
+  While a pending approval exists for a repo, delegate_coding refuses new
+  work there, even with `require_approval: false`. Pass `require_approval:
+  false` only for tasks a human has already reviewed.
 - **`pi` needs credentials**: with no authenticated provider, `pi -p` exits 0
   having emitted a tool-call JSON block and applied nothing. The tool now
   fails closed with a clear message. Run `pi auth check` — or prefer
   `opencode` / `claude` — before delegating to pi.
+
+Claude delegations run with `--output-format json`, so the reply text comes
+from `result` and the invocation's `total_cost_usd` is captured into the
+tool detail as `cli_cost_usd` (and audited). Delegations to opencode/pi
+report `"cli_cost_usd": "unmeasured"`.
+
+```bash
+uv run vtai approve          # list pending delegate approvals
+uv run vtai approve 7        # keep the pending diff
+uv run vtai approve 7 --rollback
+```
 
 ## Audit log
 
@@ -147,9 +173,11 @@ file. `vtai voice-sync --check` only reports drift (exit 1 when out of sync)
 
 Cross-platform notes (verified on macOS 27/ARM, 2026-10-12):
 
-> **Supported: Linux + macOS** (both blocking in CI). Windows keeps partial
-> accommodations (`trusted_bin_dirs`, codec default) but is untested in CI
-> and best-effort — the shell sandbox and test suite are Unix-shaped.
+> **Supported: Linux + macOS + Windows** — all three run in CI (Linux and
+> macOS push-blocked; Windows reinstated in 0.6.0 after the suite became
+> portable, with Git Bash coreutils prepended to PATH so the allowlisted
+> sandbox resolves real binaries). rsync-dependent tests skip on runners
+> without rsync and are complemented by a fail-closed counter-test.
 
 - `arecord` is used for recording on Linux; elsewhere the helpers fall back
   to `ffmpeg` (`-f pulse` / `avfoundation`), so macOS and Windows work too.
@@ -201,6 +229,7 @@ Cross-platform notes (verified on macOS 27/ARM, 2026-10-12):
   selected route carries no signal, full-scale means clipping (lower the
   boost).
 
-- **Files changed via `delegate_coding` are rolled back**: that's the
-  fail-safe default — pass `require_approval: false` after you've reviewed
-  the diff, or `verify_command` to gate on tests instead.
+- **Files changed via `delegate_coding` are still sitting in the repo**: that
+  is a pending approval — the changes are kept for your review until you run
+  `vtai approve <id>` to keep them or `--rollback` to discard them. Pass
+  `require_approval: false` only for tasks a human has already reviewed.

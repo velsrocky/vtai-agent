@@ -9,6 +9,7 @@ import pytest
 from vtai_agent.guardrails import Guardrails, GuardrailViolation
 from vtai_agent.tools.backup import BackupSyncInput, BackupSyncTool
 from vtai_agent.tools.delegate import DelegateCodingInput, DelegateCodingTool
+from vtai_agent.tools.registry import ToolError
 from vtai_agent.tools.shell import ShellInput, ShellTool
 
 _REAL_WHICH = shutil.which
@@ -58,6 +59,7 @@ def test_shell_children_get_scrubbed_env(sandbox, monkeypatch):
 
 
 # ---------- backup ----------
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync not installed")
 def test_backup_dry_run_creates_nothing(sandbox):
     src = sandbox.writable / "src"
     src.mkdir()
@@ -74,6 +76,18 @@ def test_backup_destination_outside_roots_denied(sandbox):
     with pytest.raises(GuardrailViolation):
         asyncio.run(tool.run(BackupSyncInput(
             source=str(sandbox.writable), destination=str(sandbox.tmp / "elsewhere"))))
+
+
+def test_backup_without_rsync_fails_cleanly(sandbox, monkeypatch):
+    """A machine without rsync gets a clear ToolError — even for a dry run
+    (the itemized plan IS rsync output) — never an unhandled crash."""
+    src = sandbox.writable / "src2"
+    src.mkdir()
+    monkeypatch.setattr("vtai_agent.tools.backup.shutil.which", lambda n: None)
+    tool = BackupSyncTool(_g(sandbox))
+    with pytest.raises(ToolError, match="not installed"):
+        asyncio.run(tool.run(BackupSyncInput(
+            source=str(src), destination=str(sandbox.writable / "b"))))
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync not installed")
@@ -105,9 +119,13 @@ def test_delegate_requires_git_repo(sandbox, monkeypatch):
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 @pytest.mark.parametrize("cli", ["opencode", "claude", "pi"])
-def test_delegate_dry_run_touches_nothing(sandbox, cli):
-    if shutil.which(cli) is None:
-        pytest.skip(f"{cli} not installed")
+def test_delegate_dry_run_touches_nothing(sandbox, monkeypatch, cli):
+    # Hermetic: dry runs only need `which` to succeed, never the CLI itself,
+    # so CI runners without the coding CLIs still exercise this.
+    monkeypatch.setattr(
+        "vtai_agent.tools.delegate.shutil.which",
+        lambda n: _REAL_WHICH(n) or f"/usr/bin/{n}",
+    )
     repo = sandbox.writable / "repo"
     repo.mkdir()
     init = (f"git -C {repo} init -q && git -C {repo} config user.email t@t && "
@@ -125,6 +143,15 @@ def test_delegate_dry_run_touches_nothing(sandbox, cli):
     status = os.popen(f"git -C {repo} status --porcelain").read()
     assert "?? untracked.txt" in status
     assert not Path(repo, ".git/refs/stash").exists()
+
+
+def test_delegate_claude_argv_requests_json_cost(sandbox):
+    tool = DelegateCodingTool(_g(sandbox))
+    inp = DelegateCodingInput(cli="claude", prompt="x",
+                              working_dir=str(sandbox.writable))
+    argv = tool._build_argv("claude", inp)
+    assert "--output-format" in argv and "json" in argv
+    assert "--dangerously-skip-permissions" not in argv  # opt-in only
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")

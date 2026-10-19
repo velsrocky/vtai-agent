@@ -1,6 +1,79 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] - 2026-10-19
+
+### Added
+- **Windows CI reinstated (blocking).** `windows-latest` is back in the test
+  matrix after 0.5.5 removed it as permanently red — the whole suite was
+  made platform-portable in this release. A CI-shim step prepends Git for
+  Windows' coreutils (`C:\Program Files\Git\usr\bin`) to PATH, mirroring the
+  Git Bash install Windows users of this agent have; without it a fresh
+  runner resolves no allowlisted binaries (verified locally).
+- **CLI spend metering.** `auto_mode` and `delegate_coding` now attribute the
+  delegated CLI's cost: `claude -p --output-format json` reports
+  `total_cost_usd` (per Anthropic's headless-mode docs), and auto_mode
+  enforces the sum of CLI + judge spend against
+  `guardrails.budget_usd_per_run`, failing closed when a cost-capable CLI
+  yields an unreadable spend report. `opencode`/`pi` have no headless cost
+  field (their `--format json` is an undocumented event stream — not
+  guess-parsed); their runs are bounded by `max_iterations`/`timeout` and
+  every run details `"spend": {"cli_usd": ..., }` with `"unmeasured"` where
+  no report exists.
+- **Pending-approval workflow (`delegate_coding`).** Non-interactive approval
+  (MCP, scripted, orchestrated runs) used to roll the delegate's work back
+  unconditionally — making `require_approval` effectively unusable from agent
+  sessions. Now the changes stay in the worktree and a `PendingApproval` row
+  is recorded; the run reports failure ("changes kept for review") so
+  automated loops stop. Resolve with the new **`vtai approve`** command:
+  `vtai approve` (list pending), `vtai approve <id>` (keep), or
+  `vtai approve <id> --rollback`. While an approval is pending for a repo,
+  delegate_coding refuses new work in that directory — the agent cannot
+  bypass its own gate by flipping `require_approval` on a re-run.
+- **Judge budget metering (`auto_mode`).** Judge model calls are now charged
+  against `guardrails.budget_usd_per_run`; exceeding it aborts with the
+  `error` verdict, and an unverifiable paid judge spend fails closed — the
+  same policy the orchestrator already applied to its own steps.
+
+### Fixed
+- **Malformed tool calls no longer end orchestrated runs as success.** A
+  fenced/bare JSON blob that fails to parse (or lacks a `tool` key) is
+  retried with a corrective note, bounded by `max_steps`; the run fails if
+  the model keeps emitting garbage. Parsing now uses a string-aware balanced
+  brace scan (the old greedy regex over-captured prose around the call), and
+  plain code answers are never mistaken for malformed calls.
+- **Judge verdict token is strict (`auto_mode`).** Only a bare `OK`
+  (trailing period allowed) means satisfied. The old prefix match passed
+  hedge replies like "OK, but..." as goal-satisfied.
+- **Cross-platform guardrail correctness (Windows).**
+  `check_shell` no longer mangles Windows paths — `shlex.split` in POSIX
+  mode ate backslashes (`C:\Users\rocky` → `CUsersrocky`) *before* the
+  deny/writable checks ran; Windows uses raw `shlex` with quote stripping.
+  The bare-name check catches both `/` and `\` path separators, and the
+  deny-glob literal-prefix matcher strips trailing separators of either
+  flavor (a `C:\...\protected\` prefix failed to protect the directory
+  itself). `_looks_like_path` recognizes drive letters and backslashes.
+  With these, the full test suite runs green on Windows for the first time.
+- **`backup_sync` fails cleanly without rsync.** A missing rsync was an
+  unhandled `CreateProcess` crash (even in dry runs); it is now an explicit
+  `ToolError`. Dry runs still require rsync because the itemized plan is
+  rsync's own output.
+- **Startup warning for an empty `deny_globs`.** An empty list is legal but
+  protects nothing; `validate_settings` now prints a one-line warning
+  pointing at the `vtai init` starter list.
+- **System prompt is platform-aware.** The orchestrated loop no longer
+  claims to run on "this Linux machine" whatever OS it is on.
+
+### Tests
+- 25 new tests (105 pass on Windows/Linux-shaped, 3 skips): malformed-call
+  parsing/recovery, strict judge verdicts, judge budget/unknown-spend
+  fail-closed, pending-approval lifecycle (pending → block → keep/rollback),
+  CLI spend metering (claude JSON parse, budget abort, unverifiable-spend
+  abort, opencode "unmeasured" label), the empty-deny_globs warning, missing
+  rsync fail-closed, and cross-platform shell policies. The two delegate
+  CLI-missing runtime skips became hermetic mocks (which() is faked) —
+  remaining skips are platform-required: 2× rsync tests (rsync absent on
+  Windows CI runners, present on Linux), 1× procfs test (POSIX-only); each
+  is complemented by a machine-counterpart test.
 
 ## [0.5.5] - 2026-10-13
 

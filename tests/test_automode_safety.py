@@ -42,10 +42,11 @@ def test_opencode_argv_has_no_dir_flag(sandbox, monkeypatch):
         _fake_exec_factory(_Proc(0, b"answer", b""), seen),
     )
     tool = AutoModeTool(_g(sandbox), model=None)
-    reply = asyncio.run(
+    reply, cost = asyncio.run(
         tool._ask_cli("opencode", "opencode", "hi", sandbox.writable, 10)
     )
     assert reply == "answer"
+    assert cost is None  # opencode headless output carries no spend report
     assert "--dir" not in seen["argv"]
     assert seen["argv"][:2] == ["opencode", "run"]
     assert seen["cwd"] == str(sandbox.writable)
@@ -89,7 +90,7 @@ class _DeadJudge:
 def test_judge_unavailable_fails_closed(sandbox, monkeypatch):
     """A dead judge must abort with ok=False, never report success."""
     async def fake_cli(self, binary, cli, prompt, cwd, timeout):
-        return "a plausible but unverified answer"
+        return "a plausible but unverified answer", None
 
     monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
     # run() checks shutil.which before _ask_cli; CI runners have no opencode.
@@ -144,3 +145,202 @@ def test_judge_build_failure_fails_closed(sandbox, monkeypatch):
     verdict, critique = asyncio.run(tool._judge("goal", "reply"))
     assert verdict == "error"
     assert "judge unavailable" in critique
+
+
+# ---------- strict verdict token ----------
+class _JudgeResult:
+    def __init__(self, text: str, usage=None):
+        self.output = text
+        self.usage = usage
+
+
+class _StaticJudge:
+    def __init__(self, result: _JudgeResult, **kwargs):
+        self._result = result
+
+    async def run(self, *args, **kwargs):
+        return self._result
+
+
+def test_judge_accepts_only_bare_ok(sandbox, monkeypatch):
+    cases = [
+        ("OK", "ok", ""),
+        ("OK.", "ok", ""),
+        ("  OK  ", "ok", ""),
+        ("OK, but check the timestamps", "insufficient",
+         "OK, but check the timestamps"),
+        ("Okay, task done", "insufficient", "Okay, task done"),
+        ("INSUFFICIENT: missing verification", "insufficient",
+         "missing verification"),
+    ]
+    for text, expected_verdict, expected_critique in cases:
+        monkeypatch.setattr(
+            "pydantic_ai.Agent",
+            lambda *a, **k: _StaticJudge(_JudgeResult(text)))
+        tool = AutoModeTool(_g(sandbox), model=object())
+        verdict, critique = asyncio.run(tool._judge("goal", "reply"))
+        assert verdict == expected_verdict, f"verdict for {text!r}"
+        assert critique == expected_critique, f"critique for {text!r}"
+
+
+# ---------- judge budget ----------
+def _paid_settings(sandbox, budget: float):
+    from vtai_agent.config import Guardrails as GC, ProviderOpenAI, Settings
+
+    return Settings(
+        active_provider="openai",
+        openai=ProviderOpenAI(model="test", cost_per_1k_input=1.0, cost_per_1k_output=1.0),
+        guardrails=GC(
+            budget_usd_per_run=budget,
+            deny_globs=sandbox.cfg.deny_globs,
+            trusted_bin_dirs=sandbox.cfg.trusted_bin_dirs,
+        ),
+        paths=sandbox.paths,
+    )
+
+
+def test_judge_budget_exceeded_fails_closed(sandbox, monkeypatch):
+    from types import SimpleNamespace
+
+    paid = _paid_settings(sandbox, 0.001)
+    usage = SimpleNamespace(input_tokens=5000, output_tokens=0, cost=None)
+    monkeypatch.setattr("pydantic_ai.Agent", lambda *a, **k: _StaticJudge(_JudgeResult("OK", usage)))
+    tool = AutoModeTool(_g(sandbox), settings=paid, model=object())
+    verdict, critique = asyncio.run(tool._judge("goal", "reply"))
+    assert verdict == "error"
+    assert "judge budget exceeded" in critique
+
+
+def test_judge_unknown_paid_spend_fails_closed(sandbox, monkeypatch):
+    paid = _paid_settings(sandbox, 10.0)
+    monkeypatch.setattr(
+        "pydantic_ai.Agent", lambda *a, **k: _StaticJudge(_JudgeResult("OK", usage=None)))
+    tool = AutoModeTool(_g(sandbox), settings=paid, model=object())
+    verdict, critique = asyncio.run(tool._judge("goal", "reply"))
+    assert verdict == "error"
+    assert "cannot verify judge spend" in critique
+
+
+# ---------- deputy CLI spend metering ----------
+def test_claude_argv_uses_json_output(sandbox, monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec",
+        _fake_exec_factory(_Proc(0, b'{"result": "ok answer", "total_cost_usd": 0.02}', b""),
+                           seen),
+    )
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/claude")
+    tool = AutoModeTool(_g(sandbox), model=None)
+    reply, cost = asyncio.run(
+        tool._ask_cli("claude", "claude", "fix", sandbox.writable, 10))
+    assert reply == "ok answer"
+    assert cost == pytest.approx(0.02)
+    assert "--output-format" in seen["argv"]
+    assert "json" in seen["argv"]
+
+
+def test_claude_argv_missing_cost_reports_none(sandbox, monkeypatch):
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec",
+        _fake_exec_factory(_Proc(0, b'{"result": "did it"}', b""), {}),
+    )
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/claude")
+    tool = AutoModeTool(_g(sandbox), model=None)
+    reply, cost = asyncio.run(
+        tool._ask_cli("claude", "claude", "fix", sandbox.writable, 10))
+    assert reply == "did it"
+    assert cost is None  # run() will fail closed for a cost-capable CLI
+
+
+def _auto_ok_judge(sandbox, monkeypatch):
+    monkeypatch.setattr(
+        "pydantic_ai.Agent", lambda *a, **k: _StaticJudge(_JudgeResult("OK")))
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/claude")
+
+
+def test_auto_mode_aborts_when_claude_spend_unverifiable(sandbox, monkeypatch):
+    async def fake_cli(self, binary, cli, prompt, cwd, timeout):
+        return "looks done", None
+
+    _auto_ok_judge(sandbox, monkeypatch)
+    monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
+    tool = AutoModeTool(_g(sandbox), model=object())
+    r = asyncio.run(tool.run(AutoModeInput(
+        goal="x", working_dir=str(sandbox.writable), cli="claude", dry_run=False)))
+    assert not r.ok
+    assert "cannot verify claude spend" in r.summary
+    assert r.detail["spend"]["cli_usd"] is None
+
+
+def test_auto_mode_meters_claude_spend_against_budget(sandbox, monkeypatch):
+    from vtai_agent.config import Guardrails as GC, Settings
+
+    paid = Settings(
+        guardrails=GC(budget_usd_per_run=0.10,
+                      deny_globs=sandbox.cfg.deny_globs,
+                      trusted_bin_dirs=sandbox.cfg.trusted_bin_dirs),
+        paths=sandbox.paths,
+    )
+    calls = {"n": 0}
+    replies = ["first", "second"]
+
+    async def fake_cli(self, binary, cli, prompt, cwd, timeout):
+        calls["n"] += 1
+        return replies[min(calls["n"] - 1, 1)], 0.34
+
+    _auto_ok_judge(sandbox, monkeypatch)
+    monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
+    tool = AutoModeTool(_g(sandbox), settings=paid, model=object())
+    r = asyncio.run(tool.run(AutoModeInput(
+        goal="x", working_dir=str(sandbox.writable), cli="claude",
+        max_iterations=3, dry_run=False)))
+    assert not r.ok
+    assert "budget" in r.summary and "0.34" in r.summary
+    assert calls["n"] == 1  # aborted before a second paid dispatch
+    assert r.detail["spend"]["cli_usd"] == pytest.approx(0.34)
+
+
+def test_auto_mode_meters_and_succeeds_within_budget(sandbox, monkeypatch):
+    async def fake_cli(self, binary, cli, prompt, cwd, timeout):
+        if "REVIEWER'S CRITIQUE" in prompt:
+            return "second try", 0.05
+        return "first try", 0.20
+
+    class _TwoPartJudge:
+        calls = 0
+
+        def __init__(self, *a, **k):
+            pass
+
+        async def run(self, *a, **k):
+            type(self).calls += 1
+            text = "OK" if type(self).calls > 1 else "INSUFFICIENT: incomplete"
+            return _JudgeResult(text)
+
+    _TwoPartJudge.calls = 0
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
+    monkeypatch.setattr("pydantic_ai.Agent", _TwoPartJudge)
+    tool = AutoModeTool(_g(sandbox), model=object())
+    r = asyncio.run(tool.run(AutoModeInput(
+        goal="fix the test", working_dir=str(sandbox.writable), cli="claude",
+        max_iterations=2, dry_run=False)))
+    assert r.ok and r.detail["iterations"] == 2
+    assert r.detail["spend"]["cli_usd"] == pytest.approx(0.25)
+    assert [h["cli_cost_usd"] for h in r.detail["history"]] == [0.20, 0.05]
+
+
+def test_auto_mode_opencode_spend_labeled_unmeasured(sandbox, monkeypatch):
+    async def fake_cli(self, binary, cli, prompt, cwd, timeout):
+        return "fine", None
+
+    monkeypatch.setattr(AutoModeTool, "_ask_cli", fake_cli)
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/opencode")
+    monkeypatch.setattr(
+        "pydantic_ai.Agent", lambda *a, **k: _StaticJudge(_JudgeResult("OK")))
+    tool = AutoModeTool(_g(sandbox), model=object())
+    r = asyncio.run(tool.run(AutoModeInput(
+        goal="x", working_dir=str(sandbox.writable), cli="opencode",
+        dry_run=False)))
+    assert r.ok
+    assert r.detail["spend"]["cli_usd"] == "unmeasured"

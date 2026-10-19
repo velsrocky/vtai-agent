@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from .config import get_settings
-from .models import AuditLog, Run, Step
+from .models import AuditLog, PendingApproval, Run, Step
 
 _engine = None
 
@@ -44,7 +44,7 @@ def get_engine():
     return _engine
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _current_schema_version() -> int | None:
@@ -84,7 +84,8 @@ def init_db() -> None:
         )
     SQLModel.metadata.create_all(get_engine())
     if version is None or version < SCHEMA_VERSION:
-        # Future: if version == 1, run v1 -> v2 migration here before stamping.
+        # v1 -> v2 added the PendingApproval table, which create_all above
+        # produces on an existing DB. Future real migrations go here.
         _set_schema_version(SCHEMA_VERSION)
 
 
@@ -146,3 +147,70 @@ def list_runs(limit: int = 20) -> list[Run]:
         for r in runs:
             s.expunge(r)  # detach safely: attributes already loaded
         return runs
+
+
+# ---------- pending approvals (delegate_coding human gate) ----------
+def create_pending_approval(run_id: int | None, cli: str, prompt: str,
+                            working_dir: str, snapshot: str, orig_index: str,
+                            diff: str) -> PendingApproval:
+    with session_scope() as s:
+        pa = PendingApproval(
+            run_id=run_id, cli=cli, prompt=prompt[:2000],
+            working_dir=working_dir, snapshot=snapshot, orig_index=orig_index,
+            diff=diff[:8000],
+        )
+        s.add(pa)
+        s.commit()
+        s.refresh(pa)
+        s.expunge(pa)
+        return pa
+
+
+def get_pending_approval(pa_id: int) -> PendingApproval | None:
+    with session_scope() as s:
+        pa = s.get(PendingApproval, pa_id)
+        if pa is not None:
+            s.expunge(pa)
+        return pa
+
+
+def pending_approval_for(working_dir: str) -> PendingApproval | None:
+    """The unresolved pending approval for a working dir, if any."""
+    with session_scope() as s:
+        pa = s.exec(select(PendingApproval)
+                    .where(PendingApproval.working_dir == working_dir)
+                    .where(PendingApproval.resolved.is_(False))
+                    ).first()
+        if pa is not None:
+            s.expunge(pa)
+        return pa
+
+
+def list_pending_approvals(limit: int = 20) -> list[PendingApproval]:
+    with session_scope() as s:
+        rows = list(s.exec(
+            select(PendingApproval)
+            .where(PendingApproval.resolved.is_(False))
+            .order_by(PendingApproval.id.desc())
+            .limit(limit)
+        ))
+        for pa in rows:
+            s.expunge(pa)
+        return rows
+
+
+def set_pending_resolved(pa_id: int, keep: bool) -> PendingApproval | None:
+    from datetime import datetime, timezone
+
+    with session_scope() as s:
+        pa = s.get(PendingApproval, pa_id)
+        if pa is None:
+            return None
+        pa.resolved = True
+        pa.kept = keep
+        pa.resolved_at = datetime.now(timezone.utc)
+        s.add(pa)
+        s.commit()
+        s.refresh(pa)
+        s.expunge(pa)
+        return pa

@@ -11,6 +11,7 @@ Every step is persisted, so any run is replayable and auditable.
 """
 
 import json
+import platform
 import re
 from dataclasses import dataclass, field
 
@@ -28,8 +29,12 @@ from .providers import build_model, describe_active, estimate_cost
 from .tools import ToolError, registry
 
 
+_MACHINE_OS = {
+    "Linux": "Linux", "Darwin": "macOS", "Windows": "Windows",
+}.get(platform.system(), platform.system())
+
 _SYSTEM = """\
-You are VT-AIAgent, an automation agent operating on this Linux machine.
+You are VT-AIAgent, an automation agent operating on this {machine_os} machine.
 You work toward the user's goal by calling tools, then reasoning about results.
 
 ## Protocol
@@ -54,7 +59,6 @@ You work toward the user's goal by calling tools, then reasoning about results.
 """
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
-_BARE_RE = re.compile(r'(\{\s*"tool"\s*:.*\})', re.DOTALL)
 
 
 @dataclass
@@ -96,18 +100,70 @@ def build_tool_manifest() -> str:
     return "\n".join(lines)
 
 
+def _first_balanced_json(text: str, start: int) -> str | None:
+    """First balanced {...} object at or after `start`, string-aware (braces
+    inside quoted values don't count). None when unbalanced — which is itself
+    the malformed-call signal."""
+    i = text.find("{", start)
+    if i < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for j in range(i, len(text)):
+        ch = text[j]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[i:j + 1]
+    return None
+
+
 def parse_tool_call(text: str) -> ParsedToolCall | None:
-    """Extract a tool call from the model's text, or None if it's a final answer."""
-    m = _FENCE_RE.search(text) or _BARE_RE.search(text)
-    if not m:
-        return None
-    try:
-        obj = json.loads(m.group(1))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(obj, dict) or "tool" not in obj:
-        return None
-    return ParsedToolCall(tool=str(obj["tool"]), args=obj.get("args") or {})
+    """Extract a tool call from the model's text, or None if none found."""
+    candidates: list[str] = []
+    m = _FENCE_RE.search(text)
+    if m:
+        candidates.append(m.group(1))
+    tool_kw = text.find('"tool"')
+    if tool_kw >= 0 and (m is None or m.start() > tool_kw):
+        # Bare {"tool": ...} object anywhere (model dropped the fence): scan
+        # balanced braces instead of a greedy regex that over-captures prose.
+        # Start at the brace *preceding* the key so a text-initial object's
+        # outermost brace is not skipped by find().
+        brace = text.rfind("{", 0, tool_kw)
+        blob = _first_balanced_json(text, brace if brace >= 0 else tool_kw)
+        if blob:
+            candidates.append(blob)
+    for cand in candidates:
+        try:
+            obj = json.loads(cand)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and "tool" in obj:
+            return ParsedToolCall(tool=str(obj["tool"]), args=obj.get("args") or {})
+    return None
+
+
+def looks_like_tool_call(text: str) -> bool:
+    """Heuristic for 'the model *intended* a tool call but emitted broken
+    JSON': the literal "tool" key is unambiguous; a ```json fence holding a
+    {...} blob is likely a broken call. Ordinary code answers (plain fences,
+    no json tag, no tool key) must NOT match — they are real final answers."""
+    if '"tool"' in text:
+        return True
+    return "```json" in text and _FENCE_RE.search(text) is not None
 
 
 class Orchestrator:
@@ -126,6 +182,7 @@ class Orchestrator:
             model=self.model,
             system_prompt=_SYSTEM.format(
                 manifest=build_tool_manifest(),
+                machine_os=_MACHINE_OS,
                 mode=(
                     "PREVIEW: pass dry_run: true on every call. Change nothing — "
                     "this run only previews what would happen."
@@ -183,6 +240,22 @@ class Orchestrator:
                     break
 
                 call = parse_tool_call(text)
+                if call is None and looks_like_tool_call(text):
+                    # The model tried to call a tool but emitted unparseable
+                    # JSON. Retry with a corrective note instead of reporting
+                    # the garbage as a final answer (and as run success).
+                    note = (
+                        "ERROR: malformed tool call — it was not valid JSON "
+                        'with a "tool" key. Reply with EXACTLY ONE ```json '
+                        'fenced block like {"tool": "<name>", "args": {...}} '
+                        "and nothing else, or, if you are finished, a plain "
+                        "prose answer with no JSON at all."
+                    )
+                    db.log_step(run_id, step, "malformed_call",
+                                text[:2000], note[:2000], "failed")
+                    errors.append(f"malformed tool call at step {step + 1}")
+                    prompt = note
+                    continue
                 if call is None:
                     status = "ok"
                     final_answer = text

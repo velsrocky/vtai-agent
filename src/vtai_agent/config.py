@@ -194,6 +194,14 @@ def validate_settings(s: Settings) -> None:
             errs.append(f"writable_roots entry does not exist: {r}")
     if errs:
         raise ValueError("invalid configuration:\n  - " + "\n  - ".join(errs))
+    # Soft warning: an empty deny list is legal, but it means nothing is
+    # protected — reads and writes touch everything outside nothing. The
+    # starter `vtai init` config sets ~/.ssh, ~/.gnupg, ~/.aws, **/.env.
+    if not g.deny_globs:
+        print("warning: guardrails.deny_globs is empty — no paths are protected. "
+              "Secrets outside writable_roots are still not writable, but reads "
+              "(cat, grep) reach them. See `vtai init` for a starter list.",
+              file=sys.stderr)
 
 
 def get_settings() -> Settings:

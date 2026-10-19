@@ -44,3 +44,27 @@ class AuditLog(SQLModel, table=True):
     detail: str = ""
     allowed: bool = True
     created_at: datetime = Field(default_factory=_now)
+
+
+class PendingApproval(SQLModel, table=True):
+    """A delegate_coding diff awaiting a human keep/rollback decision.
+
+    Non-interactive approval (MCP, orchestrated runs) cannot read stdin.
+    Instead of silently rolling the delegate's work back, the changes stay
+    in the worktree and an entry is recorded here for `vtai approve` to
+    resolve. While any entry for a repo is unresolved, delegate_coding
+    refuses new work in that directory — the agent cannot bypass its own
+    approval gate by flipping require_approval on the next call."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    run_id: int | None = Field(default=None, index=True)
+    cli: str = ""
+    prompt: str = ""
+    working_dir: str = ""
+    snapshot: str = ""          # pre-run snapshot ref ('' = repo was clean)
+    orig_index: str = ""        # pre-run index tree hash
+    diff: str = ""
+    resolved: bool = False
+    kept: bool | None = None
+    created_at: datetime = Field(default_factory=_now)
+    resolved_at: datetime | None = None
