@@ -154,8 +154,11 @@ uv run vtai audit --action delegate --run-id 193
 
 ## Voice control (`agent-listen` / `agent-speak`)
 
-Both helpers talk to a local Lemonade Server (STT `Whisper-Tiny`, TTS
-`kokoro-v1`) at `http://localhost:13305`. Use `--seconds N` to change the
+Both helpers talk to a local Lemonade Server (TTS `kokoro-v1`, STT
+`Whisper-Tiny` on Linux/macOS — Windows defaults to `Moonshine-Tiny-Streaming`
+because the whisper.cpp recipe misbehaves on some AMD GPUs) at
+`http://localhost:13305`. `LEMONADE_STT_MODEL` overrides the STT model on any
+platform. Use `--seconds N` to change the
 record window, `--vad` for silence-based early stop, `LEMONADE_BASE_URL` to
 point elsewhere.
 

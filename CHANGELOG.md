@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **Voice helpers work on Windows** (`agent-listen`): exact-match dshow device
+  auto-detection (names contain spaces; partial names are not matched), a
+  Store-stub-proof interpreter pick (`python3`/`python`/`py` sanity-checked;
+  the Microsoft Store stub exits without reading stdin and broke the meter
+  pipeline), `-F file=@` given the Windows path form (native curl cannot
+  open MSYS `/tmp` paths), and dshow capture written to a real file (pipe
+  WAVs carry placeholder RIFF sizes — whisper.cpp tolerates them, but
+  Lemonade's parser rejects them, and their headers also left the whisper
+  encoder reading zeros). Windows STT defaults to `Moonshine-Tiny-Streaming`;
+  the whisper.cpp recipe returns all-zero token IDs on this class of GPU.
+  `agent-speak` got the same interpreter pick.
+
 ## [0.6.0] - 2026-10-19
 
 ### Added

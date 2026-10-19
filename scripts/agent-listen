@@ -28,7 +28,16 @@ if [ -z "$MED_PY" ]; then
   exit 1
 fi
 BASE="${LEMONADE_BASE_URL:-http://localhost:13305}"
-STT_MODEL="${LEMONADE_STT_MODEL:-Whisper-Tiny}"
+STT_MODEL="${LEMONADE_STT_MODEL:-}"
+if [ -z "$STT_MODEL" ]; then
+  # Windows: the whisper.cpp recipe misbehaves on some AMD GPUs (all-zero
+  # encoder output -> hallucinated fillers), while the Moonshine recipes
+  # transcribe correctly; default to Moonshine there, Whisper elsewhere.
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) STT_MODEL="Moonshine-Tiny-Streaming" ;;
+    *) STT_MODEL="Whisper-Tiny" ;;
+  esac
+fi
 WAV="$(mktemp "${TMPDIR:-/tmp}/agent-listen.XXXXXX.wav")"
 trap 'rm -f "$WAV"' EXIT
 METER='import sys,time,struct,math
@@ -98,6 +107,7 @@ elif command -v ffmpeg >/dev/null 2>&1; then
   case "$(uname -s)" in
     Darwin) FF_IN=(-f avfoundation -i ":0") ;;
     MINGW*|MSYS*|CYGWIN*)
+      FF_MODE=file
       if [ -n "${AGENT_LISTEN_FF_INPUT:-}" ]; then
         FF_IN=(-f dshow -i "$AGENT_LISTEN_FF_INPUT")
       elif command -v ffmpeg >/dev/null 2>&1; then
@@ -121,9 +131,25 @@ elif command -v ffmpeg >/dev/null 2>&1; then
   # The level meter exits after N seconds, closing the pipe while ffmpeg is
   # still writing: under `set -o pipefail` that reads as failure, so success
   # is judged by the captured file, not the pipeline status.
-  ffmpeg -hide_banner -nostdin -loglevel error "${FF_IN[@]}" -t "$SECONDS_TO_RECORD" -ar 16000 -ac 1 -f wav pipe:1 2>/dev/null \
-    | tee "$WAV" | "$MED_PY" -u -c "$METER" "$SECONDS_TO_RECORD" >&2 || true
-  [ -s "$WAV" ] && record_ok=1
+  if [ "${FF_MODE:-}" = file ]; then
+    # Windows dshow: capture directly to a real file. Pipe-written WAVs
+    # carry placeholder RIFF sizes (ffmpeg cannot seek back), which
+    # whisper.cpp tolerates but file-shaped parsers reject; and mktemp's
+    # pre-created empty file requires -y to overwrite.
+    ffmpeg -y -hide_banner -nostdin -loglevel error "${FF_IN[@]}" \
+      -t "$SECONDS_TO_RECORD" -ar 16000 -ac 1 -f wav "$WAV" 2>/dev/null \
+      && record_ok=1
+  else
+    ffmpeg -hide_banner -nostdin -loglevel error "${FF_IN[@]}" -t "$SECONDS_TO_RECORD" -ar 16000 -ac 1 -f wav pipe:1 2>/dev/null \
+      | tee "$WAV" | "$MED_PY" -u -c "$METER" "$SECONDS_TO_RECORD" >&2 || true
+    # ffmpeg cannot seek back in a pipe, so the captured WAV carries
+    # placeholder RIFF sizes; file parsers other than whisper.cpp (e.g.
+    # Lemonade's own) reject it. Remux through a real file output to
+    # rebuild the header in place.
+    ffmpeg -y -hide_banner -loglevel error -i "$WAV" -c copy "$WAV.fix" \
+      </dev/null >/dev/null 2>&1 && mv -f "$WAV.fix" "$WAV"
+    [ -s "$WAV" ] && record_ok=1
+  fi
 else
   echo "agent-listen: need arecord or ffmpeg" >&2; exit 1
 fi
@@ -131,8 +157,16 @@ if [ "$record_ok" != 1 ] || [ ! -s "$WAV" ]; then
   echo "agent-listen: recording failed (mic not capturing)" >&2; exit 3
 fi
 for attempt in 1 2 3; do
+  # Native curl builds on Windows cannot open MSYS /tmp paths inside -F
+  # (path-conversion heuristics skip mixed-content arguments), so hand curl
+  # the Windows form of the path. POSIX stays as-is.
+  if [[ "$(uname -s)" =~ ^MINGW|^MSYS|^CYGWIN ]]; then
+    WAV_CURL="$(cygpath -w "$WAV")"
+  else
+    WAV_CURL="$WAV"
+  fi
   resp="$(curl -sf --max-time 60 -X POST "$BASE/v1/audio/transcriptions" \
-    -F "file=@$WAV" -F "model=$STT_MODEL")" && break
+    -F "file=@$WAV_CURL" -F "model=$STT_MODEL")" && break
   echo "agent-listen: STT request failed (attempt $attempt/3)" >&2
   sleep 1
 done
