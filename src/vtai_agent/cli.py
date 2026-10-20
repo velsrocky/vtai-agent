@@ -343,6 +343,72 @@ def cmd_doctor(_args) -> int:
     return run_doctor()
 
 
+def cmd_show(args) -> int:
+    """One run, in full: what it was asked to do, every tool call it made,
+    what the guardrails allowed or refused, and what it cost."""
+    run = db.get_run(args.run_id)
+    if run is None:
+        print(f"no run #{args.run_id}", file=sys.stderr)
+        recent = db.list_runs(limit=5)
+        if recent:
+            print("recent runs: " + ", ".join(
+                f"#{r.id} ({r.status})" for r in recent), file=sys.stderr)
+        return 1
+
+    started = run.started_at.strftime("%Y-%m-%d %H:%M:%S") if run.started_at else "?"
+    finished = run.finished_at.strftime("%H:%M:%S") if run.finished_at else "—"
+    print(f"run #{run.id}  {run.status}  mode={'dry' if run.dry_run else 'exec'}"
+          f"  provider={run.provider or '-'}")
+    print(f"  goal     : {run.goal}")
+    print(f"  started  : {started}  finished: {finished}")
+    print(f"  steps    : {run.steps_done}/{run.steps_total}   spend: ${run.cost_usd:.4f}")
+
+    steps = db.list_steps(run.id)
+    if steps:
+        print(f"\nsteps ({len(steps)}):")
+        for st in steps:
+            print(f"  [{st.idx}] {st.tool:<18} {st.status:<8} {_summarize(st.input_json)}")
+            out = _summarize(st.output_json)
+            if out:
+                print(f"       → {out}")
+    else:
+        print("\nsteps: none recorded")
+
+    rows = db.list_audit_rows(run.id)
+    if rows:
+        denied = [r for r in rows if not r.allowed]
+        print(f"\naudit ({len(rows)} entries, {len(denied)} denied):")
+        for r in rows:
+            verdict = "allow" if r.allowed else "DENY"
+            print(f"  {r.created_at.strftime('%H:%M:%S')} {verdict:<5} {r.action:<12} {r.detail[:90]}")
+    else:
+        print("\naudit: nothing recorded for this run")
+
+    approvals = db.list_pending_approvals()
+    mine = [a for a in approvals if a.run_id == run.id]
+    if mine:
+        print("\npending approvals:")
+        for a in mine:
+            print(f"  #{a.id} {a.cli} {a.working_dir} — `vtai approve {a.id}`")
+    return 0
+
+
+def _summarize(raw: str, limit: int = 110) -> str:
+    """One line of a JSON blob, for a human reading a run."""
+    if not raw:
+        return ""
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return raw[:limit]
+    if isinstance(data, dict):
+        for key in ("summary", "error", "message"):
+            if data.get(key):
+                return str(data[key])[:limit]
+    text = json.dumps(data, separators=(", ", ": "))
+    return text[:limit]
+
+
 def cmd_audit(args) -> int:
     from sqlmodel import select
 
@@ -416,6 +482,10 @@ def build_parser() -> argparse.ArgumentParser:
     r2.add_argument("--status", help="ok | failed | aborted | budget_exceeded | running")
     r2.add_argument("--grep", help="Case-insensitive substring on goal")
     r2.set_defaults(func=cmd_runs)
+
+    sh = sub.add_parser("show", help="Show one run in full: steps, audit trail, spend")
+    sh.add_argument("run_id", type=int, help="Run id (see `vtai runs`)")
+    sh.set_defaults(func=cmd_show)
 
     ap = sub.add_parser("approve",
                         help="Resolve pending delegate_coding approvals")

@@ -55,6 +55,15 @@ or `shell_extra_modes`, and a resolve path under `trusted_bin_dirs`.
 uv run pytest -xvs
 ```
 
+Everything mocks the provider, which is what keeps the suite fast and
+hermetic — and what hides the failures that only appear with a real model.
+Those are covered by an opt-in end-to-end module that runs against whatever
+provider is configured:
+
+```bash
+VTAI_E2E=1 uv run pytest tests/test_e2e_live.py -v
+```
+
 ## Code of Conduct
 
 - Be respectful

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.5] - 2026-10-20
+
+### Added
+- **`vtai show <run_id>`** — one run in full: the goal, the mode, every tool
+  call with its input and result, what the guardrails allowed or refused,
+  the spend, and any approval still waiting. Until now a run could be
+  listed (`vtai runs`) and its audit rows filtered (`vtai audit --run-id`),
+  but there was no way to see the whole story of one run in one place.
+- **`vtai doctor` reports the audit database** — row count and size. The
+  trail is never pruned automatically (it is the record of what the agent
+  did), so the useful thing is to *see* how large it has become.
+- **Opt-in end-to-end tests** (`VTAI_E2E=1 uv run pytest tests/test_e2e_live.py`).
+  Every other test mocks the provider, which hides what actually breaks: a
+  model that answers in prose, a tool call the parser cannot read, a
+  provider that is not there. These run against the configured provider —
+  a local Ollama, Lemonade or a cloud key — and are skipped by default.
+
 ## [0.6.4] - 2026-10-20
 
 ### Added

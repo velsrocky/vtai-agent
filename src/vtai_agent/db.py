@@ -149,6 +149,51 @@ def list_runs(limit: int = 20) -> list[Run]:
         return runs
 
 
+def get_run(run_id: int) -> Run | None:
+    with session_scope() as s:
+        r = s.get(Run, run_id)
+        if r is not None:
+            s.expunge(r)
+        return r
+
+
+def list_steps(run_id: int) -> list[Step]:
+    """The tool calls of one run, in order — the replayable record."""
+    with session_scope() as s:
+        rows = list(s.exec(
+            select(Step).where(Step.run_id == run_id).order_by(Step.id)
+        ).all())
+        for r in rows:
+            s.expunge(r)
+        return rows
+
+
+def audit_stats() -> tuple[int, int]:
+    """(audit rows, database file size in bytes).
+
+    The audit trail is never pruned automatically — it is the record of what
+    the agent did — so it is worth *seeing* how large it has become.
+    """
+    from sqlalchemy import func
+
+    with session_scope() as s:
+        rows = s.exec(select(func.count()).select_from(AuditLog)).one()
+    path = db_path()
+    size = path.stat().st_size if path.exists() else 0
+    return int(rows), size
+
+
+def list_audit_rows(run_id: int, limit: int = 200) -> list[AuditLog]:
+    with session_scope() as s:
+        rows = list(s.exec(
+            select(AuditLog).where(AuditLog.run_id == run_id)
+            .order_by(AuditLog.id).limit(limit)
+        ).all())
+        for r in rows:
+            s.expunge(r)
+        return rows
+
+
 # ---------- pending approvals (delegate_coding human gate) ----------
 def create_pending_approval(run_id: int | None, cli: str, prompt: str,
                             working_dir: str, snapshot: str, orig_index: str,

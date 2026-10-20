@@ -312,6 +312,14 @@ uv run vtai audit --denied --grep ssh
 uv run vtai audit --action delegate --run-id 193
 ```
 
+To see one run end to end — the goal, every tool call, what was allowed or
+refused, and the spend:
+
+```bash
+uv run vtai runs            # list runs
+uv run vtai show 193        # one run in full
+```
+
 ## Voice control (`agent-listen` / `agent-speak`)
 
 Both helpers talk to a local Lemonade Server (TTS `kokoro-v1`, STT

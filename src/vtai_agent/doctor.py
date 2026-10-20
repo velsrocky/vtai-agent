@@ -255,6 +255,22 @@ def run_doctor() -> int:
         r.add("mcp registration", WARN,
               "not registered — run scripts/register-mcp.sh")
 
+    # --- audit database ---------------------------------------------------
+    try:
+        from .db import audit_stats
+
+        rows, size = audit_stats()
+        mb = size / (1024 * 1024)
+        detail = f"{rows} audit rows, {mb:.1f} MB"
+        if size > 50 * 1024 * 1024:
+            r.add("audit database", WARN,
+                  f"{detail} — the trail is never pruned automatically; "
+                  f"archive it if it has grown unwieldy")
+        else:
+            r.add("audit database", OK, detail)
+    except Exception as e:
+        r.add("audit database", WARN, f"unreadable ({e})")
+
     # --- pending approvals -------------------------------------------------
     pending = _pending_approvals()
     if pending:

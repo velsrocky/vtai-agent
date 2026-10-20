@@ -1,6 +1,6 @@
 [project]
 name = "vtai-agent"
-version = "0.6.4"
+version = "0.6.5"
 description = "VT-AIAgent — system-automation agent exposed as an MCP server for opencode/claude/pi"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -23,6 +23,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "e2e: live end-to-end checks against a real model (opt in with VTAI_E2E=1)",
+]
 
 [tool.ruff]
 line-length = 100
