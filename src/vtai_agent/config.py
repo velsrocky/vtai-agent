@@ -43,6 +43,13 @@ def config_source() -> str:
     return "user-level"
 
 
+def error_summary(exc: Exception) -> str:
+    """The useful part of a validation error: the first line is the generic
+    'invalid configuration:' header, the lines below it are the causes."""
+    lines = [ln.strip(" -") for ln in str(exc).splitlines()[1:] if ln.strip()]
+    return "; ".join(lines[:2]) if lines else str(exc).splitlines()[0]
+
+
 class _Priced(BaseModel):
     """USD per 1,000 tokens. None = fall back to pydantic-ai's native cost
     table, then 0.0 (free)."""

@@ -178,9 +178,9 @@ def run_doctor() -> int:
     except ValueError as e:
         # The message starts with a generic "invalid configuration:" header;
         # the lines below it are the actual causes.
-        lines = [ln.strip(" -") for ln in str(e).splitlines()[1:] if ln.strip()]
-        detail = "; ".join(lines[:2]) if lines else str(e).splitlines()[0]
-        r.add("config valid", FAIL, f"{detail} — run `vtai init`")
+        from .config import error_summary
+
+        r.add("config valid", FAIL, f"{error_summary(e)} — run `vtai init`")
     except Exception as e:  # pragma: no cover - defensive
         r.add("config valid", FAIL, str(e))
 

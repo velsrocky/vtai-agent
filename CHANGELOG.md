@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.6.4] - 2026-10-20
+
+### Added
+- **The HTTP transport has tests.** It is a security-relevant surface that
+  was documented but never exercised: it now has coverage for refusing to
+  bind a non-localhost address without a token, rejecting a request with no
+  token or the wrong one (401), and serving a real MCP session over
+  StreamableHTTP. The app factory was extracted from `cmd_serve` so the auth
+  path is testable without a live server.
+- **`system_info` reports the agent and its boundaries.** The tool now
+  includes the agent version, which config file is in effect (and whether it
+  is the checkout's or the user's), whether it validates, the writable
+  roots, the deny globs, the shell allowlist and whether the run is dry —
+  so a model driving the agent knows the boundaries it works inside.
+
+### Fixed
+- **The MCP registration could use a different config than the CLI.** A
+  client may spawn the server from a daemon that never sources the shell
+  profile, so `VT_CONFIG` exported in a profile never reached the server,
+  which then fell back to the checkout's config. `register-mcp.sh` now pins
+  `VT_CONFIG` in the registration when the user keeps their own config.
+
 ## [0.6.3] - 2026-10-20
 
 ### Added

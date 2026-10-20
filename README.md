@@ -10,7 +10,7 @@ opencode / Claude Code / pi — and drivable directly via the `vtai` CLI.
 
 | Tool | What it does |
 |---|---|
-| `system_info` | Read-only machine snapshot (CPU, RAM, disks, load, AMD GPU) |
+| `system_info` | Read-only machine snapshot (CPU, RAM, disks, load, GPU) plus the config and guardrails in effect |
 | `run_shell` | Allowlisted shell commands, sandboxed (see below) |
 | `organize_files` | Content-aware directory cleanup inside writable roots |
 | `backup_sync` | rsync incremental backup with verification; `--delete` is opt-in |

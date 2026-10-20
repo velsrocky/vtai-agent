@@ -245,6 +245,28 @@ def cmd_run(args) -> int:
     return 0 if result.ok else 1
 
 
+def _http_app(host: str, token: str):
+    """The HTTP transport app: the MCP server plus bearer auth when a token
+    is set. Extracted so the auth path is testable without a live server."""
+    from .mcp_server import build_server
+
+    app = build_server().streamable_http_app(host=host)
+
+    if token:
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.responses import JSONResponse
+
+        class _BearerAuth(BaseHTTPMiddleware):
+            async def dispatch(self, request, call_next):
+                auth = request.headers.get("authorization", "")
+                if auth != f"Bearer {token}":
+                    return JSONResponse({"error": "unauthorized"}, status_code=401)
+                return await call_next(request)
+
+        app.add_middleware(_BearerAuth)
+    return app
+
+
 def cmd_serve(args) -> int:
     import os
 
@@ -263,20 +285,7 @@ def cmd_serve(args) -> int:
 
     import uvicorn
 
-    app = build_server().streamable_http_app(host=args.host)
-
-    if token:
-        from starlette.middleware.base import BaseHTTPMiddleware
-        from starlette.responses import JSONResponse
-
-        class _BearerAuth(BaseHTTPMiddleware):
-            async def dispatch(self, request, call_next):
-                auth = request.headers.get("authorization", "")
-                if auth != f"Bearer {token}":
-                    return JSONResponse({"error": "unauthorized"}, status_code=401)
-                return await call_next(request)
-
-        app.add_middleware(_BearerAuth)
+    app = _http_app(args.host, token)
 
     try:
         db.sweep_orphaned_runs()

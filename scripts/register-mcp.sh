@@ -27,14 +27,31 @@ if command -v opencode >/dev/null 2>&1; then
   echo "  opencode -> $OPENCODE_CONFIG"
   # --global writes the user-level config; without it the server lands in the
   # current directory's opencode.json and is only visible in this project.
-  opencode mcp add --global vtai-agent -- "${CMD[@]}" 2>/dev/null \
-    || echo "  (manual edit needed: add mcp.servers.vtai-agent to $OPENCODE_CONFIG)"
+  #
+  # If the user keeps their own config, pin it as VT_CONFIG in the
+  # registration: the client may spawn the server from a daemon that never
+  # sources the shell profile, and the server would otherwise fall back to
+  # the checkout's config — a different one from what the CLI uses.
+  if [ -f "$HOME/.vtaiagent/settings.toml" ]; then
+    echo "  config   -> $HOME/.vtaiagent/settings.toml (pinned as VT_CONFIG)"
+    opencode mcp add --global vtai-agent \
+      --env "VT_CONFIG=$HOME/.vtaiagent/settings.toml" -- "${CMD[@]}" 2>/dev/null \
+      || echo "  (manual edit needed: add mcp.servers.vtai-agent to $OPENCODE_CONFIG)"
+  else
+    opencode mcp add --global vtai-agent -- "${CMD[@]}" 2>/dev/null \
+      || echo "  (manual edit needed: add mcp.servers.vtai-agent to $OPENCODE_CONFIG)"
+  fi
 fi
 
 # --- Claude Code: user-scoped ---
 if command -v claude >/dev/null 2>&1; then
   echo "  claude  -> user scope"
-  claude mcp add vtai-agent -s user -- "${CMD[@]}" || true
+  if [ -f "$HOME/.vtaiagent/settings.toml" ]; then
+    claude mcp add vtai-agent -s user \
+      --env "VT_CONFIG=$HOME/.vtaiagent/settings.toml" -- "${CMD[@]}" || true
+  else
+    claude mcp add vtai-agent -s user -- "${CMD[@]}" || true
+  fi
 fi
 
 # --- pi: no native MCP; verify the CLI is reachable instead ---

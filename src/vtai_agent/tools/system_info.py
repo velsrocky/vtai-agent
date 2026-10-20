@@ -34,6 +34,7 @@ class SystemInfoTool(Tool[SystemInfoInput]):
             "load": os_loadavg(),
             "memory": memory_info(),
             "disks": disk_info(),
+            "agent": agent_info(),
         }
         if inp.include_gpu:
             info["gpu"] = await gpu_info()
@@ -44,6 +45,33 @@ class SystemInfoTool(Tool[SystemInfoInput]):
                     f"{len(info['disks'])} mounts",
             detail=info,
         )
+
+
+def agent_info() -> dict:
+    """Which agent build and config is in effect, and what it may touch.
+
+    The model driving this tool needs to know the boundaries it works
+    inside: which config file the server loaded (a checkout's own config
+    and the user's config are not the same thing), where it may write, and
+    whether it is running dry.
+    """
+    from .. import __version__
+    from ..config import CONFIG_TOML, config_source, error_summary, get_settings
+
+    info: dict = {"version": __version__, "config_file": str(CONFIG_TOML),
+                  "config_source": config_source()}
+    try:
+        s = get_settings()
+    except ValueError as e:
+        info["config_valid"] = False
+        info["config_error"] = error_summary(e)
+        return info
+    info["config_valid"] = True
+    info["dry_run_default"] = s.guardrails.dry_run_default
+    info["writable_roots"] = [str(p) for p in s.paths.writable_roots]
+    info["deny_globs"] = list(s.guardrails.deny_globs)
+    info["shell_allowlist"] = list(s.guardrails.shell_allowlist)
+    return info
 
 
 def os_cpu_count() -> int:
