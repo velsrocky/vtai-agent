@@ -327,6 +327,13 @@ def cmd_approve(args) -> int:
     return 0 if result.ok else 1
 
 
+def cmd_doctor(_args) -> int:
+    """Preflight: is this machine set up to run the agent?"""
+    from .doctor import run_doctor
+
+    return run_doctor()
+
+
 def cmd_audit(args) -> int:
     from sqlmodel import select
 
@@ -376,6 +383,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("info", help="Show provider, paths, and guardrail config").set_defaults(func=cmd_info)
     sub.add_parser("tools", help="List registered tools").set_defaults(func=cmd_tools)
+    sub.add_parser("doctor", help="Preflight checks: is this machine set up?").set_defaults(func=cmd_doctor)
 
     i = sub.add_parser("init", help="Create/validate config, writable roots, data dir")
     i.add_argument("--force", action="store_true", help="Overwrite existing config")

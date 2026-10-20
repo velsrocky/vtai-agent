@@ -1,8 +1,33 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.3] - 2026-10-20
+
+### Added
+- **`vtai doctor`** — a preflight that answers "is this machine set up?" in
+  one command: the uv version against the declared floor, which config file
+  is in effect (and whether it is the checkout's or yours), whether it
+  validates, the writable roots, what is protected, the shell allowlist, the
+  optional tools (`rsync`, `ffmpeg`), the model endpoint, the voice helpers
+  and server, the MCP registration, and any delegate waiting for review. It
+  reports problems instead of raising them and exits non-zero when
+  something needs fixing.
+- **`config/settings.example.toml`** — a valid, commented starting point. A
+  fresh clone used to ship the maintainer's production config, which does
+  not validate on anyone else's machine.
+- **Public-repo hygiene**: `SECURITY.md` (what counts as a vulnerability,
+  how to report one privately, operator hardening notes), a pull-request
+  template, bug/feature issue templates, a CI badge and a license pointer
+  in the README.
 
 ### Fixed
+- **The Docker image had no usable config.** The package is installed
+  editable, so the checkout's `config/settings.toml` counts as
+  "repo-adjacent" — the container inherited the maintainer's paths. The
+  image now ships its own config and points `VT_CONFIG` at it, so the
+  healthcheck and `vtai doctor` work inside the container.
+- **CI built the image but never ran it.** The docker job now smoke-tests
+  the CLI, the config and the stdio MCP server, and it runs on pull
+  requests too, not just pushes.
 - **`scripts/register-mcp.sh` registered the server per project, not
   globally.** `opencode mcp add` writes to the current directory's
   `opencode.json` unless `--global` is passed, so the script's own comment

@@ -1,0 +1,88 @@
+# VT-AIAgent — example configuration
+#
+# Copy this to ~/.vtaiagent/settings.toml and point VT_CONFIG at it:
+#
+#   export VT_CONFIG="$HOME/.vtaiagent/settings.toml"
+#   vtai init     # creates the dirs this file refers to
+#   vtai doctor   # checks that everything below actually works
+#
+# The agent resolves its config in this order:
+#   1. $VT_CONFIG
+#   2. config/settings.toml next to the package (a checkout's own config)
+#   3. ~/.vtaiagent/settings.toml
+#
+# Every value can also be overridden with an environment variable: the `VT_`
+# prefix with `__` for nesting, e.g. VT_GUARDRAILS__DRY_RUN_DEFAULT=false.
+
+# Which provider runs the planner/judge model: anthropic | openai | local
+active_provider = "local"
+
+[anthropic]
+model = "claude-sonnet-4-5"
+# USD per 1k tokens, used for budget_usd_per_run. Unset = use
+# pydantic-ai's native price table, then 0.0.
+# cost_per_1k_input = 0.003
+# cost_per_1k_output = 0.015
+
+[openai]
+model = "gpt-5"
+# cost_per_1k_input = 0.00125
+# cost_per_1k_output = 0.01
+
+[local]
+# Any OpenAI-compatible endpoint: llama.cpp server, Ollama, vLLM, LM Studio,
+# Lemonade. No API key needed.
+base_url = "http://localhost:11434/v1"
+model    = "qwen2.5-coder:7b"
+api_key  = "ollama"
+
+[guardrails]
+# Nothing touches disk unless a run explicitly executes.
+dry_run_default  = true
+max_steps        = 40
+max_retries      = 3
+# A run aborts when accrued spend exceeds this. 0 disables the cap.
+budget_usd_per_run = 1.0
+# Echo-loop breaker: after N denials of the identical action within the
+# window, denial messages escalate with a CIRCUIT BREAKER stop-retrying note.
+max_repeat_denials    = 3
+denial_window_seconds = 300
+# Commands run_shell may execute. argv[0] must be a bare name in this list
+# AND have a sandbox policy in guardrails.py (fail-closed). Binaries that can
+# execute arbitrary code (find, git, systemctl, …) are deliberately absent.
+shell_allowlist = [
+  "ls", "cat", "head", "tail", "wc", "du", "df", "free", "grep", "file",
+  "stat", "mkdir", "mv", "cp", "rsync", "tar", "zip", "unzip",
+  "rocm-smi", "vulkaninfo", "nproc", "uptime", "pytest", "vm_stat",
+]
+# Paths that are never readable or writable, whatever the writable roots say.
+# An empty list is legal but protects nothing — keep these.
+deny_globs = [
+  "~/.ssh/**", "~/.gnupg/**", "~/.aws/**", "~/.config/opencode/**",
+  "~/.claude/**", "~/.opencode/**", "**/.env", "**/.aws",
+]
+# run_shell executes binaries only after they resolve under one of these
+# prefixes. Missing entries are ignored (validation only fails when none
+# exist), so one config can list both Linux and macOS paths.
+trusted_bin_dirs = [
+  "/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin",
+]
+# Extend the built-in shell policy: how each allowlisted binary's path
+# arguments are treated (none = no paths, read = read-only, write = mutating).
+[guardrails.shell_extra_modes]
+pytest = "write"
+
+[media]
+# Linux only: the VAAPI render node. Ignored elsewhere.
+vaapi_device = "/dev/dri/renderD128"
+# h264_vaapi on Linux; libx264 elsewhere. An explicit codec in a tool call
+# overrides this.
+video_codec = "h264_vaapi"
+container = "mkv"
+output_dir_name = "transcoded"
+
+[paths]
+# Writes are confined to these roots. Narrow them to what you actually need.
+writable_roots = ["~/Downloads", "~/Documents/vt-data", "~/.vtaiagent/tmp"]
+# The audit database, the data dir, and the kill switch live here.
+data_dir = "~/.vtaiagent"

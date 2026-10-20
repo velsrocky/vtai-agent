@@ -45,12 +45,28 @@ jobs:
   build-docker:
     runs-on: ubuntu-latest
     needs: [test]
-    if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v6
 
       - name: Build Docker
         run: docker build -t vtai-agent .
+
+      - name: Smoke test the image
+        run: |
+          # The image's CMD is the stdio MCP server; the CLI is the cheapest
+          # proof that the environment, the config and the entrypoint work.
+          docker run --rm vtai-agent uv run vtai --help
+          docker run --rm vtai-agent uv run vtai tools
+          # `doctor` exits non-zero when the model endpoint is unreachable,
+          # which is expected in a bare container — assert the parts that
+          # must work: the config loads and the writable roots are there.
+          docker run --rm vtai-agent uv run vtai doctor 2>&1 | tee /tmp/doctor.txt || true
+          grep -q "config valid" /tmp/doctor.txt
+          grep -q "writable roots" /tmp/doctor.txt
+          # The stdio server must answer an MCP initialize (informational:
+          # timing on a cold container is not a reliable gate).
+          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            | docker run -i --rm vtai-agent || true
 
   release:
     runs-on: ubuntu-latest

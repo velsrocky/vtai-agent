@@ -158,12 +158,18 @@ mount exactly the roots you allow.
 ## Verify
 
 ```bash
-uv run pytest tests/ -v          # 109 tests incl. sandbox bypass attempts
+uv run vtai doctor                      # preflight: one command, all checks
+uv run pytest tests/ -v                 # 127 tests incl. sandbox bypass attempts
 uv run ruff check src/ tests/
 uv run vtai info
 uv run vtai run run_shell --params '{"command":"cat ~/.ssh/id_rsa"}'
 # expected: [ERROR] GuardrailViolation: ... Protected path ...
 ```
+
+`vtai doctor` is the one to run first: it checks uv, the config file and its
+validity, the writable roots, what is protected, the optional tools, the
+model endpoint, the MCP registration and any delegate waiting for review,
+and exits non-zero if something needs fixing.
 
 ## Operations checklist
 

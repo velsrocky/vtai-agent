@@ -1,5 +1,8 @@
 # VT-AIAgent
 
+[![CI](https://github.com/velsrocky/vtai-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/velsrocky/vtai-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 System-automation agent for **your** machine, exposed as an MCP server for
 opencode / Claude Code / pi — and drivable directly via the `vtai` CLI.
 
@@ -123,6 +126,31 @@ Set `cost_per_1k_input` / `cost_per_1k_output` in the provider block to make
 model's native price table.
 
 ### 3. Verify
+
+Start with the preflight — it checks uv, your config, the writable roots,
+what is protected, the optional tools, the model endpoint, the MCP
+registration and any delegate waiting for review:
+
+```bash
+uv run vtai doctor
+```
+
+```
+VT-AIAgent doctor — v0.6.2
+  ✓  agent version      0.6.2
+  ✓  uv                 0.13.1
+  ✓  config file        /Users/you/.vtaiagent/settings.toml (user-level)
+  ✓  config valid       no issues
+  ✓  writable roots     3 present
+  ✓  protected paths    4 deny globs
+  ✓  shell allowlist    22 binaries
+  ✓  model endpoint     http://localhost:11434/v1
+  !  optional tools     not installed: ffmpeg (for transcode_media, voice helpers)
+  ✓  mcp registration   opencode (global)
+  ✓  pending approvals  none
+```
+
+It exits non-zero if something needs fixing. Then, to try the pieces:
 
 ```bash
 uv run vtai info                         # config, provider, guardrails
@@ -390,3 +418,17 @@ Cross-platform notes (verified on macOS 27/ARM, 2026-10-12):
   is a pending approval — the changes are kept for your review until you run
   `vtai approve <id>` to keep them or `--rollback` to discard them. Pass
   `require_approval: false` only for tasks a human has already reviewed.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) — setup, the guardrail rules any
+change has to respect, and the test/lint commands.
+
+## Security
+
+Guardrails, what counts as a vulnerability, and how to report one privately:
+[SECURITY.md](SECURITY.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE). Use it, fork it, run it on your own machine.

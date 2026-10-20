@@ -28,6 +28,30 @@ RUN useradd --create-home --shell /bin/bash vtai \
 USER vtai
 ENV HOME=/home/vtai
 
+# Give the container its own config. Without this the agent would pick up
+# the checkout's config/settings.toml (the package is installed editable, so
+# that file is "repo-adjacent") — which carries the maintainer's paths and
+# is not this container's business.
+RUN printf '%s\n' \
+    'active_provider = "local"' \
+    '' \
+    '[local]' \
+    'base_url = "http://localhost:11434/v1"' \
+    'model    = "qwen2.5-coder:7b"' \
+    'api_key  = "ollama"' \
+    '' \
+    '[guardrails]' \
+    'dry_run_default = true' \
+    'shell_allowlist = ["ls","cat","head","tail","wc","du","df","grep","file","stat","mkdir","mv","cp","rsync","tar","zip","unzip"]' \
+    'deny_globs = ["~/.ssh/**","~/.gnupg/**","~/.aws/**","**/.env"]' \
+    'trusted_bin_dirs = ["/usr/bin","/bin","/usr/local/bin"]' \
+    '' \
+    '[paths]' \
+    'writable_roots = ["/home/vtai/Downloads","/home/vtai/Documents/vt-data","/home/vtai/.vtaiagent/tmp"]' \
+    'data_dir = "/home/vtai/.vtaiagent"' \
+    > /home/vtai/.vtaiagent/settings.toml
+ENV VT_CONFIG=/home/vtai/.vtaiagent/settings.toml
+
 # The MCP server speaks stdio and has no HTTP port; a sane "is it alive"
 # check is that the config loads and the CLI responds.
 HEALTHCHECK --interval=60s --timeout=10s --start-period=15s --retries=3 \
