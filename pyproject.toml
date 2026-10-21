@@ -1,6 +1,6 @@
 [project]
 name = "vtai-agent"
-version = "0.6.5"
+version = "0.6.6"
 description = "VT-AIAgent — system-automation agent exposed as an MCP server for opencode/claude/pi"
 readme = "README.md"
 license = "MIT"
