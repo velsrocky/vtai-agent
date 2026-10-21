@@ -42,7 +42,12 @@ class ToolResult(BaseModel):
 
 
 class ToolError(Exception):
-    pass
+    """Tool failure. `code` carries an optional entry from errors.CODES so
+    rejection surfaces stay machine-readable."""
+
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class Tool(ABC, Generic[T]):

@@ -208,6 +208,7 @@ bind externally without one.
 uv sync --dev
 uv run pytest tests/ -v
 uv run ruff check src/ tests/
+uv run python scripts/generate_tool_catalog.py --check   # tool-catalog doc drift
 ```
 
 The config file is resolved as described in [Configure](#2-configure): `$VT_CONFIG`

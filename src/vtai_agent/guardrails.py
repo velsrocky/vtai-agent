@@ -23,6 +23,7 @@ from pathlib import Path
 from .config import Guardrails as GuardrailsConfig
 from .config import Settings, get_settings
 from . import db
+from .errors import suffix as _code_suffix
 
 # Run attribution for guardrail decisions raised outside a tool's explicit
 # audit calls (denials from check_shell/check_writable). Set by the
@@ -73,7 +74,12 @@ SHELL_DENY_FLAGS: dict[str, tuple[str, ...]] = {
 
 
 class GuardrailViolation(PermissionError):
-    """Raised when an action is outside the allowlist."""
+    """Raised when an action is outside the allowlist. `code` carries an
+    optional entry from errors.CODES; the message keeps its prose."""
+
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 # Echo-loop breaker state: (action, detail) -> [count, last_ts]. Process-wide,
@@ -107,7 +113,9 @@ class Guardrails:
         if not any(self._is_within(p, r) for r in roots):
             note = self._deny_action("write", str(p), f"outside writable_roots: {roots}")
             raise GuardrailViolation(
-                f"Not writable (outside allowlist): {p}" + (f" — {note}" if note else ""))
+                f"Not writable (outside allowlist): {p}{_code_suffix('E_PATH_WRITABLE')}"
+                + (f" — {note}" if note else ""),
+                code="E_PATH_WRITABLE")
         return p
 
     def check_readable(self, path: str | Path) -> Path:
@@ -121,7 +129,10 @@ class Guardrails:
             if fnmatch.fnmatch(s, pat) or self._within_literal_prefix(s, pat):
                 note = self._deny_action("access", s, f"matches deny glob {pat}")
                 raise GuardrailViolation(
-                    f"Protected path: {p}" + (f" — {note}" if note else ""))
+                    f"Protected path: {p}{_code_suffix('E_PATH_PROTECTED')}"
+                    + (f" — {note}" if note else ""),
+                    code="E_PATH_PROTECTED")
+
     def is_denied(self, path: str | Path) -> bool:
         """Non-raising check used to filter scan results out of reports."""
         try:
@@ -188,29 +199,36 @@ class Guardrails:
             else:
                 argv = shlex.split(command)
         except ValueError as e:
-            return self._reject_shell([], command, f"unparseable: {e}")
+            return self._reject_shell([], command, f"unparseable: {e}",
+                                      code="E_SHELL_UNPARSEABLE")
         if not argv:
-            return self._reject_shell([], command, "empty command")
+            return self._reject_shell([], command, "empty command",
+                                      code="E_SHELL_EMPTY")
 
         binary = argv[0]
         if os.sep in binary or "/" in binary:
             return self._reject_shell(argv, command,
-                                      f"binary must be a bare name, not a path: {binary}")
+                                      f"binary must be a bare name, not a path: {binary}",
+                                      code="E_SHELL_PATH_BINARY")
         if binary not in self.cfg.shell_allowlist:
-            return self._reject_shell(argv, command, f"binary '{binary}' not in allowlist")
+            return self._reject_shell(argv, command, f"binary '{binary}' not in allowlist",
+                                      code="E_SHELL_NOT_ALLOWLISTED")
 
         mode = self._mode_for(binary)
         if mode is None:
             return self._reject_shell(argv, command,
-                                      f"'{binary}' is allowlisted but has no sandbox policy")
+                                      f"'{binary}' is allowlisted but has no sandbox policy",
+                                      code="E_SHELL_NO_POLICY")
 
         found = shutil.which(binary)
         if found is None:
-            return self._reject_shell(argv, command, f"'{binary}' not found on PATH")
+            return self._reject_shell(argv, command, f"'{binary}' not found on PATH",
+                                      code="E_SHELL_BIN_MISSING")
         real_p = Path(found).resolve()
         if not any(real_p.is_relative_to(Path(t)) for t in self._trusted):
             return self._reject_shell(argv, command,
-                                      f"'{binary}' resolves outside trusted dirs: {real_p}")
+                                      f"'{binary}' resolves outside trusted dirs: {real_p}",
+                                      code="E_SHELL_BIN_UNTRUSTED")
         real = str(real_p)
 
         for arg in argv[1:]:
@@ -219,7 +237,8 @@ class Guardrails:
                         flag.startswith("-") and not flag.startswith("--")
                         and arg.startswith(flag)):
                     return self._reject_shell(argv, command,
-                                              f"flag '{arg}' not permitted for '{binary}'")
+                                              f"flag '{arg}' not permitted for '{binary}'",
+                                              code="E_SHELL_FLAG_DENY")
 
         tokens = argv[1:]
         path_args: list[str] = []
@@ -245,7 +264,8 @@ class Guardrails:
                     if self._looks_like_path(a, base_dir):
                         self.check_readable(self._anchored(a, base_dir))
         except GuardrailViolation as e:
-            return self._reject_shell(argv, command, f"argument rejected: {e}")
+            return self._reject_shell(argv, command, f"argument rejected: {e}",
+                                      code="E_SHELL_ARG_REJECTED")
 
         return ShellDecision([real, *argv[1:]], command, True)
 
@@ -272,11 +292,13 @@ class Guardrails:
             return Path(base_dir).expanduser() / p
         return p
 
-    def _reject_shell(self, argv: list[str], command: str, reason: str) -> ShellDecision:
+    def _reject_shell(self, argv: list[str], command: str, reason: str,
+                      code: str = "") -> ShellDecision:
         note = self._deny_action("shell", command, reason)
         if note:
             reason = f"{reason} — {note}"
-        return ShellDecision(argv, command, False, reason)
+        return ShellDecision(argv, command, False,
+                             f"{reason}{_code_suffix(code)}")
 
     def _mode_for(self, binary: str) -> str | None:
         extra = self.cfg.shell_extra_modes.get(binary)
@@ -309,7 +331,9 @@ class Guardrails:
     def ensure_not_killed(self) -> None:
         if self.kill_switch_active():
             self._deny_action("abort", "kill switch", "operator kill switch active")
-            raise GuardrailViolation("Kill switch active — refusing to act")
+            raise GuardrailViolation(
+                f"Kill switch active — refusing to act{_code_suffix('E_KILL_SWITCH')}",
+                code="E_KILL_SWITCH")
 
     # ---------- audit ----------
     def _note_denial(self, action: str, detail: str) -> bool:

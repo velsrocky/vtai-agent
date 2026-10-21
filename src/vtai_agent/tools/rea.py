@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 
 from .. import db
 from ..config import CapabilityRea, Settings, get_settings
+from ..errors import suffix as _code_suffix
 from ..guardrails import Guardrails
 from .automode import AutoModeTool
 from .registry import Tool, ToolError, ToolResult
@@ -107,12 +108,16 @@ class InspectApplicationTool(Tool[InspectApplicationInput]):
         if not cfg.enabled:
             raise ToolError(
                 "REA capability is disabled in config; enable it with "
-                "[capabilities.rea] enabled=true first")
+                "[capabilities.rea] enabled=true first"
+                f"{_code_suffix('E_CAP_DISABLED')}",
+                code="E_CAP_DISABLED")
         resolved, argv_prefix = self._resolve_command(cfg)
 
         target = self.g.check_readable(inp.target)
         if not target.exists():
-            raise ToolError(f"target does not exist: {inp.target}")
+            raise ToolError(
+                f"target does not exist: {inp.target}{_code_suffix('E_TARGET_MISSING')}",
+                code="E_TARGET_MISSING")
 
         timeout = float(inp.timeout if inp.timeout is not None else cfg.timeout)
         plan = {
@@ -204,17 +209,25 @@ class InspectApplicationTool(Tool[InspectApplicationInput]):
         metacharacters (mirrors validate_settings, since a tool instance may
         outlive a settings edit)."""
         if os.sep in cfg.binary or "\\" in cfg.binary:
-            raise ToolError(f"REA binary must be a bare name, not a path: {cfg.binary!r}")
+            raise ToolError(
+                f"REA binary must be a bare name, not a path: {cfg.binary!r}"
+                f"{_code_suffix('E_CAP_BIN_BARE')}",
+                code="E_CAP_BIN_BARE")
         for tok in cfg.command_prefix:
             if (not tok or any(c.isspace() for c in tok) or ".." in tok
                     or any(c in tok for c in ";&|<>`$")):
-                raise ToolError(f"REA command token rejected: {tok!r}")
+                raise ToolError(
+                    f"REA command token rejected: {tok!r}"
+                    f"{_code_suffix('E_CAP_TOKEN_INVALID')}",
+                    code="E_CAP_TOKEN_INVALID")
         resolved = shutil.which(cfg.binary)
         if resolved is None:
             raise ToolError(
                 f"'{cfg.binary}' not found on PATH; install REA only from the "
                 "official sources (github.com/morluto/rea, "
-                "`npm install --global rea-agents`), then retry")
+                f"`npm install --global rea-agents`), then retry"
+                f"{_code_suffix('E_CAP_BIN_MISSING')}",
+                code="E_CAP_BIN_MISSING")
         return resolved, [*cfg.command_prefix]
 
     def _copy_into_quarantine(self, target: Path, qdir: Path) -> dict[str, int]:
