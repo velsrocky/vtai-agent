@@ -63,3 +63,32 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           verbose: true
+
+  # Lists the server in the official MCP registry (io.github.velsrocky/
+  # vtai-agent) so one tag ships everywhere. Auth is GitHub Actions OIDC —
+  # the same trust-free pattern as the PyPI publish above; no stored token,
+  # so there is nothing to expire mid-release (observed: manually issued
+  # registry JWTs expired between releases).
+  publish-registry:
+    runs-on: ubuntu-latest
+    needs: [publish]
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install mcp-publisher 1.8.1 (checksum pinned)
+        run: |
+          curl -fsSL -o mcp-publisher_linux_amd64.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz"
+          echo "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  mcp-publisher_linux_amd64.tar.gz" | sha256sum --check -
+          tar -xzf mcp-publisher_linux_amd64.tar.gz
+
+      - name: Authenticate with the registry via GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      # server.json's version is bumped on main before tagging (house
+      # process), so the checkout at the tag carries the matching version.
+      - name: Publish server.json to the registry
+        run: ./mcp-publisher publish server.json
