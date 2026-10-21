@@ -1,0 +1,34 @@
+name: Windows smoke
+
+# The suite stays unix-pinned by design (voice helpers, VAAPI, procps), but
+# the core machinery can be exercised on Windows: config validation, tool
+# surface, and the audit DB. Weekly + manual, not blocking unix CI.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Setup Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Tool surface loads
+        run: uv run vtai tools
+
+      - name: Config validates on win32 defaults
+        run: uv run vtai info
+
+      - name: Audit DB schema smokes
+        run: uv run vtai runs --limit 1

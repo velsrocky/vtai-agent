@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.velsrocky/vtai-agent -->
 # VT-AIAgent
 
 [![CI](https://github.com/velsrocky/vtai-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/velsrocky/vtai-agent/actions/workflows/ci.yml)
@@ -194,6 +195,22 @@ uv tool install --editable /path/to/vtai-agent   # -> ~/.local/bin/vtai
 Install into another project as a dependency with
 `uv add git+https://github.com/velsrocky/vtai-agent@v0.6.1`, or pull the
 image with `docker build -t vtai-agent .`.
+
+## Registry & distribution
+
+PyPI: `uv tool install vtai-agent` (or `pipx install vtai-agent`) — publishes
+on `v*` tags via Trusted Publishing with build attestations (see
+`.github/workflows/publish.yml`). The `<!-- mcp-name: ... -->` comment above
+is the PyPI-package proof the official MCP registry expects; `server.json`
+carries the registry manifest (`io.github.velsrocky/vtai-agent`, stdio)
+alongside a metadata-consistency gate in the publish workflow. Only install
+from these sources; a similar repository name does not establish provenance.
+
+Register with the official MCP registry after a PyPI release:
+```bash
+mcp-publisher auth --oauth2-github
+mcp-publisher publish server.json
+```
 
 ## HTTP transport
 

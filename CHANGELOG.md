@@ -252,6 +252,15 @@
   is complemented by a machine-counterpart test.
 
 ### Added
+- **Distribution & reach (phase 2)**: MCP-registry manifest `server.json`
+  (`io.github.velsrocky/vtai-agent`, pypi package, stdio) + the
+  `<!-- mcp-name: ... -->` proof comment in README; PyPI Trusted Publishing
+  workflow (`.github/workflows/publish.yml`) with OIDC, build attestations,
+  and a metadata-consistency gate (pyproject ⇔ server.json ⇔ README pin);
+  PEP 639 packaging metadata (MIT license expression, classifiers, urls,
+  keywords) — `vtai-agent` wheel builds cleanly; Windows smoke workflow
+  (weekly + manual) validating tool surface, config, and audit DB on win32.
+  PyPI installs: `uv tool install vtai-agent`.
 - **Stable error codes** (`src/vtai_agent/errors.py`): every fail-closed
   surface — deny globs, shell rejections, kill switch, capability gating —
   now appends and carries a machine-readable code (`E_PATH_PROTECTED,

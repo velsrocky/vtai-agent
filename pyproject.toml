@@ -3,6 +3,26 @@ name = "vtai-agent"
 version = "0.6.5"
 description = "VT-AIAgent — system-automation agent exposed as an MCP server for opencode/claude/pi"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "VT-AIAgent Contributors" }]
+keywords = [
+    "mcp", "mcp-server", "claude", "opencode", "agent", "guardrails",
+    "audit", "automation", "sandbox", "llm-agent",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Software Development :: AI Agents",
+]
+urls = { repository = "https://github.com/velsrocky/vtai-agent", issues = "https://github.com/velsrocky/vtai-agent/issues", changelog = "https://github.com/velsrocky/vtai-agent/blob/main/CHANGELOG.md" }
 requires-python = ">=3.14"
 dependencies = [
     "mcp>=2.2.0",
