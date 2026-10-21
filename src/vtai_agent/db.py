@@ -201,6 +201,7 @@ def summarize_runs(limit: int = 500) -> dict:
 
     Evidence over claims: every field is a measurement, not an opinion.
     """
+    import json
     import re
 
     from collections import Counter
@@ -236,6 +237,56 @@ def summarize_runs(limit: int = 500) -> dict:
         for st in steps:
             tool_counts[st.tool] += 1
             tool_status.setdefault(st.tool, Counter())[st.status or "none"] += 1
+
+        # Judge-quality telemetry: auto_mode runs an internal judge loop and
+        # records the outcome per iteration ("ok"/"insufficient"/"error") in
+        # the step row's output_json (a ToolResult dump). Parsing is
+        # best-effort and tolerant: rows without a parseable detail block —
+        # e.g. orchestrator truncation at 4000 chars — count as unparsed,
+        # never as evidence. Verdicts aggregate per provider.
+        provider_of = {r.id: (r.provider or "unknown") for r in runs}
+        judge_by_provider: dict[str, dict] = {}
+        for st in steps:
+            if st.tool != "auto_mode":
+                continue
+            if st.status == "running" and not st.output_json:
+                continue  # mid-call placeholder row, not a judge outcome
+            agg = judge_by_provider.setdefault(provider_of.get(st.run_id, "unknown"), {
+                "steps": 0, "parsed": 0, "unparsed": 0,
+                "verdicts": Counter(), "_iters": [],
+            })
+            agg["steps"] += 1
+            try:
+                payload = json.loads(st.output_json)
+                detail = payload.get("detail") if isinstance(payload, dict) else None
+                if not isinstance(detail, dict):
+                    raise ValueError("no detail block")
+                hist = detail.get("history")
+                verdicts = ([h.get("verdict") for h in hist]
+                            if isinstance(hist, list) else [])
+                for v in verdicts:
+                    if isinstance(v, str):
+                        agg["verdicts"][v] += 1
+                iters = detail.get("iterations")
+                agg["_iters"].append(int(iters) if isinstance(iters, int)
+                                     else len(verdicts))
+                agg["parsed"] += 1
+            except (TypeError, ValueError):
+                agg["unparsed"] += 1
+        judge: dict[str, dict] = {}
+        for prov, agg in judge_by_provider.items():
+            iters = agg.pop("_iters")
+            judge[prov] = {
+                "steps": agg["steps"],
+                "parsed": agg["parsed"],
+                "unparsed": agg["unparsed"],
+                "verdicts": dict(agg["verdicts"]),
+                "iterations": {
+                    "runs": len(iters),
+                    "mean": round(sum(iters) / len(iters), 2) if iters else None,
+                    "max": max(iters) if iters else None,
+                },
+            }
 
         denials_by_code: Counter[str] = Counter()
         denials_by_action: Counter[str] = Counter()
@@ -285,6 +336,8 @@ def summarize_runs(limit: int = 500) -> dict:
                 "by_action": dict(denials_by_action.most_common()),
                 "by_code": dict(denials_by_code.most_common()),
             },
+            "judge": dict(sorted(judge.items(),
+                                 key=lambda kv: -kv[1]["steps"])),
         }
 
 
@@ -317,6 +370,17 @@ def format_runs_summary(summ: dict) -> str:
         lines.append("  tools: " + " | ".join(
             f"{t} {d['calls']} (ok {d['ok']})" for t, d in shown)
             + (f" | +{more} more" if more > 0 else ""))
+    for prov, jd in list(summ["judge"].items())[:3]:
+        parts = [f"  judge[{prov}]: {jd['steps']} calls"]
+        if jd["unparsed"]:
+            parts.append(f"unparsed {jd['unparsed']} (truncated/unreadable rows)")
+        if jd["verdicts"]:
+            parts.append("verdicts " + " ".join(
+                f"{k} {v}" for k, v in sorted(jd["verdicts"].items())))
+        it = jd["iterations"]
+        if it["runs"]:
+            parts.append(f"iters mean {it['mean']} max {it['max']}")
+        lines.append(" | ".join(parts))
     dn = summ["denials"]
     if dn["total"]:
         codes = ", ".join(f"{c} {n}" for c, n in dn["by_code"].items()) or "no codes"

@@ -1,9 +1,23 @@
 """Run telemetry summary (`vtai runs --summary`): aggregation math must be
 right on a seeded history — status split, spend percentiles, tool counts,
-and denial-code extraction including the error taxonomy."""
+denial-code extraction including the error taxonomy, and judge verdicts
+parsed out of auto_mode's step rows."""
 
 from vtai_agent import db
 from vtai_agent.errors import CODES
+
+
+def _judge_dump(*verdicts, iterations=None):
+    """The exact payload shape the orchestrator logs: ToolResult.dump_json
+    truncated at 4000 chars."""
+    from vtai_agent.tools.registry import ToolResult
+    hist = [{"iteration": i, "verdict": v} for i, v in enumerate(verdicts, 1)]
+    detail = {"plan": {"max_iterations": 3},
+              "history": hist,
+              "iterations": (iterations if iterations is not None
+                             else len(verdicts)),
+              "final_answer": "did the thing"}
+    return ToolResult(ok=True, summary="auto loop", detail=detail).model_dump_json()
 
 
 def _seed_history(sandbox):
@@ -97,3 +111,59 @@ def test_summary_respects_limit_window(sandbox):
     # spend/denials only see the truncated window
     assert s["spend"]["measured_runs"] == 1  # only the failed run had cost
     assert s["spend"]["total_usd"] == 0.02
+
+
+def test_judge_verdicts_aggregate_per_provider(sandbox):
+    r1 = db.start_run("judge goal", dry_run=False, provider="opencode")
+    db.log_step(r1, 0, "auto_mode", "{}", _judge_dump("ok", "ok"), "ok")
+    db.log_step(r1, 1, "auto_mode", "{}", _judge_dump("ok"), "ok")
+    db.log_step(r1, 2, "auto_mode", "{}", "", "running")  # placeholder row
+    db.finish_run(r1, "ok")
+    r2 = db.start_run("claude goal", dry_run=False, provider="claude")
+    db.log_step(r2, 0, "auto_mode", "{}", _judge_dump("insufficient", "error"),
+                "ok")
+    db.finish_run(r2, "ok")
+
+    s = db.summarize_runs(limit=50)
+    judge = s["judge"]
+    assert set(judge) == {"opencode", "claude"}  # placeholder row not counted
+
+    jd = judge["opencode"]
+    assert jd["steps"] == 2
+    assert jd["parsed"] == 2
+    assert jd["verdicts"] == {"ok": 3}
+    assert jd["iterations"] == {"runs": 2, "mean": 1.5, "max": 2}
+
+    jd = judge["claude"]
+    assert jd["steps"] == 1
+    assert jd["verdicts"] == {"error": 1, "insufficient": 1}
+    assert jd["iterations"]["max"] == 2
+
+
+def test_judge_truncated_row_is_unparsed_not_evidence(sandbox):
+    """A 4000-char truncation must degrade to 'unparsed', never invent
+    verdicts from a partial read."""
+    r1 = db.start_run("truncated", dry_run=False, provider="local")
+    dump = _judge_dump("ok", "error")
+    db.log_step(r1, 0, "auto_mode", "{}", dump[:80], "failed")
+    db.finish_run(r1, "failed")
+
+    jd = db.summarize_runs(limit=50)["judge"]["local"]
+    assert jd["steps"] == 1
+    assert jd["parsed"] == 0
+    assert jd["unparsed"] == 1
+    assert jd["verdicts"] == {}
+
+
+def test_judge_renders_one_line_per_provider(sandbox):
+    r1 = db.start_run("judge goal", dry_run=False, provider="opencode")
+    db.log_step(r1, 0, "auto_mode", "{}", _judge_dump("ok", "ok"), "ok")
+    db.finish_run(r1, "ok")
+    r2 = db.start_run("cannot see", dry_run=False, provider="claude")
+    db.log_step(r2, 0, "auto_mode", "{}",
+                _judge_dump("insufficient", "error"), "ok")
+    db.finish_run(r2, "ok")
+
+    out = db.format_runs_summary(db.summarize_runs(limit=50))
+    assert "judge[opencode]: 1 calls | verdicts ok 2 | iters mean 2.0 max 2" in out
+    assert "judge[claude]: 1 calls | verdicts error 1 insufficient 1" in out
