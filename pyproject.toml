@@ -20,7 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Security",
     "Topic :: System :: Systems Administration",
-    "Topic :: Software Development :: AI Agents",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 urls = { repository = "https://github.com/velsrocky/vtai-agent", issues = "https://github.com/velsrocky/vtai-agent/issues", changelog = "https://github.com/velsrocky/vtai-agent/blob/main/CHANGELOG.md" }
 requires-python = ">=3.14"
