@@ -2,16 +2,32 @@
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-10-21
+
 ### Added
-- **`vtai runs --summary`** — the aggregate view the per-run listing never
-  gave you: over the last `--limit` runs (default 500), measured status
-  split with dry-run-first share, spend distribution (total across
-  measured runs, mean, p50, p95), completion-duration percentiles, tool
-  call counts with ok/failed split, and — reading the audit trail through
-  the `E_*` error taxonomy — which fail-closed codes the guardrails
-  actually fired and how often. `--json` prints the raw structure for
-  dashboards. Denial codes for rows predating 0.6.6 show as "no codes"
-  (the audit trail is immutable, not re-labeled).
+- **Judge-quality telemetry** (`vtai runs --summary`): `auto_mode` records
+  a judge verdict per iteration (`ok`/`insufficient`/`error`), and the
+  summary now aggregates those step rows into a per-provider judge block —
+  call counts, verdict distribution, iteration mean/max. Truncated or
+  unparseable step rows count as `unparsed` rather than silently dropping
+  from the evidence (tolerant parsing, 4 new tests).
+- **vtai-cert R9 — delegate verify-then-trust** (profile
+  `guardrails-core@2`, nine requirements): with a scripted fake CLI
+  (no real coding agent, no network), the suite now proves three real
+  guarantees — delegation without a snapshot guarantee is refused,
+  verify-failure auto-rollback restores the exact tree (tracked content
+  restored and the delegate's new files removed), and the non-interactive
+  approval gate leaves changes as a resolvable pending approval whose
+  human rollback restores the tree again. A pytest twin disables the
+  rollback and asserts the certificate honestly says `passed: false`.
+  fake passes are not tolerated: the probe's own harness bug was caught
+  during development and fixed before it could certify a "pass".
+
+### Changed
+- README's REA section now carries live-validation receipts
+  (`docs/showcases/rea-live-validation.md`): the real `rea` 6.7.0 CLI ran
+  end-to-end through `inspect_application` — spawn contract, `--json`
+  envelope, and evidence digest all confirmed against reality.
 
 ## [0.6.6] - 2026-10-21
 
