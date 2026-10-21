@@ -13,7 +13,7 @@ def test_clean_tree_passes_every_requirement(tmp_path):
     assert cert["all_passed"] is True
     assert cert["profile"] == PROFILE
     assert {c["id"] for c in cert["checks"]} == {"R1", "R2", "R3", "R4", "R5",
-                                                "R6", "R7", "R8"}
+                                                "R6", "R7", "R8", "R9"}
     assert cert["digest"].startswith("sha256:")
     for c in cert["checks"]:
         assert c["passed"] and c["evidence"]
@@ -47,6 +47,21 @@ def test_weakened_guardrails_fail_the_suite(tmp_path, monkeypatch):
     assert cert["all_passed"] is False
     r1 = next(c for c in cert["checks"] if c["id"] == "R1")
     assert r1["passed"] is False and "MISSED" in r1["evidence"]
+
+
+def test_weakened_delegate_rollback_fails_r9(tmp_path, monkeypatch):
+    """A broken rollback guarantee must be visible in the certificate, not
+    hidden behind a successful delegate exit."""
+    from vtai_agent.tools import delegate as delegate_mod
+
+    async def dead_restore(self, cwd, snapshot, run_id, why, orig_index=""):
+        return  # rollback disabled — the tree keeps the fake CLI's edits
+
+    monkeypatch.setattr(delegate_mod.DelegateCodingTool, "_restore",
+                        dead_restore)
+    cert = run_certification(tmp_path)
+    r9 = next(c for c in cert["checks"] if c["id"] == "R9")
+    assert r9["passed"] is False
 
 
 def test_kill_switch_probe_cleans_up(tmp_path):

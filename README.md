@@ -217,7 +217,9 @@ mcp-publisher publish server.json
 Safety claims are probes, not prose: `vtai certify` runs the executable
 guardrail-compliance suite (deny-glob containment, dotdot/symlink escapes,
 fail-closed shell, injected-argv resistance, dry-run-first, kill switch,
-audit exactness, echo-loop breaker) and emits a digest-stamped certificate;
+audit exactness, echo-loop breaker, and the delegate's verify-then-trust
+loop with scripted-fake rollback + approval-gate probes) and emits a
+digest-stamped certificate;
 exit 0 gates the release in CI. See [docs/certification.md](docs/certification.md).
 
 ## HTTP transport

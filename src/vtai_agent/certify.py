@@ -22,9 +22,13 @@ import hashlib
 import json
 import platform
 import shutil
+import subprocess
+import sys
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from sqlmodel import select
@@ -35,10 +39,12 @@ from .config import Paths, Settings, validate_settings
 from .guardrails import GuardrailViolation, Guardrails
 from .models import AuditLog
 from .tools import OrganizeFilesTool, ShellTool
+from .tools import delegate as _delegate_mod
+from .tools.delegate import DelegateCodingInput, DelegateCodingTool
 from .tools.files import OrganizeFilesInput
 from .tools.shell import ShellInput
 
-PROFILE = "guardrails-core@1"
+PROFILE = "guardrails-core@2"
 
 
 @dataclass
@@ -267,6 +273,130 @@ def probe_circuit_breaker(ctx: CertContext) -> ProbeResult:
     return ProbeResult("CIRCUIT BREAKER" in reason, f"final refusal: {reason[:300]}")
 
 
+FAKE_DELEGATE_BODY = """#!/usr/bin/env bash
+# cert fake: edits like a coding CLI would, exits 0
+printf 'REFACTORED v1\\n' >> app.py
+printf '{"note": "new file"}\\n' > CHANGELOG-NEW.md
+exit 0
+"""
+
+# Windows sibling of the POSIX fake (git's shell may be absent there);
+# redirect-first form avoids cmd's digit-swallowing redirect parsing.
+FAKE_DELEGATE_BODY_NT = """@echo off
+>>"app.py" echo REFACTORED v1
+>"CHANGELOG-NEW.md" echo {"note": "new file"}
+exit /b 0
+"""
+
+
+def probe_delegate_rollback(ctx: CertContext) -> ProbeResult:
+    """Certify delegate_coding's verify-then-trust loop with a scripted fake
+    CLI (no real coding agent, no network): snapshot refusal outside git,
+    verify-failure rollback restoring the exact tree, and the non-interactive
+    approval gate — a resolvable pending approval whose human-rollback
+    decision also restores the tree."""
+    missing = [b for b in ("git", "grep") if shutil.which(b) is None]
+    if missing:
+        return ProbeResult(False, f"missing probe tools: {', '.join(missing)}")
+
+    # Unique per run: a crashed earlier attempt cannot block this one via a
+    # stale unresolved pending approval on the same working dir.
+    mini = ctx.writable / f"miniapp-{uuid.uuid4().hex[:8]}"
+    mini.mkdir(parents=True)
+    app_py = mini / "app.py"
+    new_md = mini / "CHANGELOG-NEW.md"
+
+    def _tree_original() -> bool:
+        return app_py.read_text() == "ORIGINAL\n" and not new_md.exists()
+
+    def _git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(mini), *args],
+                              capture_output=True, text=True, timeout=60)
+
+    notes: list[str] = []
+    ok_a = ok_b = ok_c = False
+    orig_resolver = _delegate_mod.resolve_cli_argv
+    orig_stdin = sys.stdin
+    try:
+        app_py.write_text("ORIGINAL\n")
+        for cmd in (["init", "-q"], ["add", "-A"]):
+            r = _git(*cmd)
+            if r.returncode != 0:
+                return ProbeResult(
+                    False, f"fixture git {cmd[0]} failed: {r.stderr[-200:]}")
+        r = _git("-c", "user.email=cert@vtai-agent.local", "-c",
+                 "user.name=vtai-cert", "commit", "-q", "-m", "init")
+        if r.returncode != 0:
+            return ProbeResult(
+                False, f"fixture git commit failed: {r.stdout[-200:]}")
+
+        # The delegate target is bound to a shelved fake via resolve_cli_argv
+        # — the same seam the real per-CLI resolver fills, no real agent run.
+        fakebin = ctx.root / "fakebin"
+        fakebin.mkdir(exist_ok=True)
+        is_win = platform.system() == "Windows"
+        script = fakebin / ("fakepi.cmd" if is_win else "fakepi")
+        script.write_text(FAKE_DELEGATE_BODY_NT if is_win else FAKE_DELEGATE_BODY)
+        if hasattr(script, "chmod"):
+            script.chmod(script.stat().st_mode | 0o111)
+        _delegate_mod.resolve_cli_argv = lambda _b: [str(script)]
+
+        # Force the non-interactive approval path wherever the suite runs.
+        sys.stdin = SimpleNamespace(isatty=lambda: False)
+
+        tool = DelegateCodingTool(ctx.g)
+
+        def _run(**kw: Any) -> Any:
+            target = Path(kw.pop("target"))
+            return asyncio.run(tool.run(DelegateCodingInput(
+                cli="pi", prompt="cert probe: refactor app.py",
+                working_dir=str(target), dry_run=False, **kw)))
+
+        # (a) no git repo -> no snapshot guarantee -> refuse before running
+        estray = ctx.writable / f"nonrepo-{uuid.uuid4().hex[:6]}"
+        estray.mkdir()
+        try:
+            _run(target=estray)
+            notes.append("MISSED: delegate ran without a snapshot guarantee")
+        except Exception as e:  # noqa: BLE001 — any refusal surface counts
+            ok_a = True
+            notes.append(f"no-git refused: {type(e).__name__}: {str(e)[:140]}")
+
+        # (b) the CLI "edits successfully", verification fails -> rollback
+        app_py.write_text("ORIGINAL\n")  # uniform start of both real parts
+        res = _run(target=mini, verify_command="grep ABSENT_TOKEN app.py",
+                   auto_rollback=True)
+        ok_b = (not res.ok and res.detail.get("rolled_back") is True
+                and res.detail.get("verify", {}).get("ok") is False
+                and _tree_original())
+        notes.append(
+            f"verify-fail: ok={res.ok} rolled_back={res.detail.get('rolled_back')} "
+            f"tree_restored={_tree_original()}")
+
+        # (c) verification passes but stdin is not a TTY: changes stay on
+        # disk as a resolvable pending approval; the human rollback must
+        # also restore the exact tree.
+        res2 = _run(target=mini, verify_command="grep REFACTORED app.py")
+        deet = res2.detail
+        pa_id = deet.get("approval_id")
+        pa = db.get_pending_approval(pa_id) if pa_id is not None else None
+        left_behind = app_py.exists() and "REFACTORED" in app_py.read_text()
+        ok_c = (not res2.ok and deet.get("needs_approval") is True
+                and pa is not None and not pa.resolved and left_behind)
+        if pa is not None and not pa.resolved:
+            resolve = asyncio.run(tool.resolve_pending(pa.id, keep=False))
+            ok_c = ok_c and resolve.ok and not resolve.detail.get("kept")
+            ok_c = ok_c and _tree_original()
+        notes.append(
+            f"approval gate: needs_approval={deet.get('needs_approval')} "
+            f"pending_id={pa_id} unresolved={getattr(pa, 'resolved', None)!s} "
+            f"changes_left={left_behind}")
+    finally:
+        _delegate_mod.resolve_cli_argv = orig_resolver
+        sys.stdin = orig_stdin
+    return ProbeResult(ok_a and ok_b and ok_c, " | ".join(notes))
+
+
 def default_requirements() -> list[Requirement]:
     return [
         Requirement(
@@ -308,6 +438,13 @@ def default_requirements() -> list[Requirement]:
             "Repeated identical denials escalate with a CIRCUIT BREAKER stop "
             "message.",
             probe_circuit_breaker),
+        Requirement(
+            "R9", "delegate verify-then-trust",
+            "Delegation without a snapshot guarantee is refused; a "
+            "verify-failure rollback restores the exact tree; the "
+            "non-interactive approval gate leaves changes as a resolvable "
+            "pending approval whose human rollback also restores the tree.",
+            probe_delegate_rollback),
     ]
 
 

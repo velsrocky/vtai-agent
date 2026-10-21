@@ -21,7 +21,7 @@ DB, mirroring the pytest sandbox). It is not a cross-vendor MCP-server
 attestation. Ship it alongside a release as proof the shipped binary
 enforces the contract — not as a claim about anyone else's server.
 
-## Profile `guardrails-core@1`
+## Profile `guardrails-core@2`
 
 | Req | What it proves | Probe (evidence recorded on refusal) |
 |---|---|---|
@@ -33,14 +33,20 @@ enforces the contract — not as a claim about anyone else's server.
 | R6 | kill switch | the `KILL` file stops executing tools with `E_KILL_SWITCH` (and the probe cleans up) |
 | R7 | auditable decisions | exactly the claimed rows appear in the audit DB for fresh refusals |
 | R8 | echo-loop breaker | repeated identical denials escalate to a CIRCUIT BREAKER stop message |
+| R9 | delegate verify-then-trust | with a scripted fake CLI: delegation without a snapshot guarantee is refused; verify-failure rollback restores the exact tree; the non-interactive approval gate leaves changes as a resolvable pending approval whose human rollback also restores the tree |
+
+Profile history: `@1` was R1–R8 (v0.6.6); `@2` adds R9 (v0.6.7). A weaker
+suite silently passing would be worth nothing — one of the pytest twins
+does exactly that to the delegate rollback and asserts the certificate
+says `passed: false`.
 
 ## Certificate schema
 
 ```json
 {
   "product": "vtai-agent",
-  "version": "0.5.5",
-  "profile": "guardrails-core@1",
+  "version": "0.6.6",
+  "profile": "guardrails-core@2",
   "generated_at": "2026-10-21T01:48:08+00:00",
   "host": {"python": "3.14.0", "os": "Linux-…"},
   "config": {"writable_roots": ["…"], "deny_globs": ["…"],
