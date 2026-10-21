@@ -251,6 +251,20 @@
   Windows CI runners, present on Linux), 1× procfs test (POSIX-only); each
   is complemented by a machine-counterpart test.
 
+### Added
+- **`inspect_application`** (REA capability integration): drive
+  [morluto/rea](https://github.com/morluto/rea) static analysis from
+  vtai-agent under full guardrails. The target must pass the deny-glob
+  check, is copied into a quarantine dir under `data_dir` (REA never sees
+  the original path), runs with a minimal child environment, and the
+  returned evidence carries a sha256 digest + evidence id in the audit
+  trail. Optional judge pass (same policy as auto_mode) verifies the
+  evidence actually answers the requested goal before reporting success.
+  The capability is OFF by default: enable with
+  `[capabilities.rea] enabled = true` (binary, CLI subcommand prefix,
+  timeout, and `keep_copy` are configurable; `validate_settings` rejects
+  path strings and shell metacharacters in the prefix).
+
 ## [0.5.5] - 2026-10-13
 
 ### Added

@@ -18,6 +18,7 @@ opencode / Claude Code / pi — and drivable directly via the `vtai` CLI.
 | `disk_audit` | Read-only scan for reclaimable disk space |
 | `delegate_coding` | Hand tasks to opencode/claude/pi; git snapshot + verify + rollback; require human approval by default |
 | `auto_mode` | Autonomous loop: hand a goal to a coding CLI, review the reply, iterate until it matches |
+| `inspect_application` | REA-powered static analysis of an app under guardrails: deny-glob check → quarantine copy → minimal-env run → evidence digest in the audit trail → optional judge pass (off until enabled in config) |
 
 ## Safety model
 
@@ -300,6 +301,42 @@ uv run vtai approve 7 --rollback
 
 `vtai info` shows how many approvals are waiting, so a delegate that was kept
 for review does not get lost.
+
+## Inspect applications (REA capability)
+
+`inspect_application` integrates [REA](https://github.com/morluto/rea) so the
+agent can statically explain how a local app works without source code.
+Because REA's inspection is powerful, it runs entirely inside vtai-agent's
+guards and is **off by default**:
+
+```toml
+[capabilities.rea]
+enabled        = true             # enable only after install vetting
+binary         = "rea"
+command_prefix = ["analyze-javascript-application"]
+timeout        = 1800.0
+keep_copy      = false
+```
+
+Safety contract, in order: the target must pass `deny_globs`; it is then
+copied into a quarantine dir under `data_dir` (denied entries and
+out-of-policy symlinks are skipped on the way in, so REA never reads a path
+you couldn't); REA runs on the copy with a minimal child environment (no
+inherited API keys) and is killed after `timeout`; output JSON is parsed and
+a sha256 evidence digest plus REA's evidence id are written to the audit
+trail; the optional judge pass (same model and fail-closed policy as
+auto_mode) verifies the evidence answers the goal before the result reports
+success. The original target is never touched, and the quarantine copy is
+deleted unless `keep_copy` is true.
+
+```bash
+uv run vtai run inspect_application \
+  --params '{"goal":"explain how Notes builds its CSV export header",
+             "target":"~/quarantine/Notes-app","dry_run":true}'
+```
+
+Install REA only from official sources (github.com/morluto/rea or the
+`rea-agents` package on npm — verify provenance), not mirror sites.
 
 ## Audit log
 

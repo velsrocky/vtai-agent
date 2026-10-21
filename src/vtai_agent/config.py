@@ -102,6 +102,30 @@ class Guardrails(BaseModel):
     )
 
 
+class CapabilityRea(BaseModel):
+    """REA (github.com/morluto/rea) optional analysis capability.
+
+    REA gives an agent powerful binary/JS inspection, so it stays OFF until
+    explicitly enabled, and `inspect_application` runs it only on a quarantine
+    copy of the target with a minimal child environment."""
+    enabled: bool = False
+    # Bare binary name, resolved via shutil.which at call time. Never a path.
+    binary: str = "rea"
+    # REA CLI subcommand tokens appended after the binary, e.g. to target the
+    # JavaScript/Electron analyzer (validate_settings rejects path strings and
+    # shell metacharacters).
+    command_prefix: list[str] = Field(
+        default_factory=lambda: ["analyze-javascript-application"],
+    )
+    timeout: float = Field(default=1800.0, ge=1, le=7200)
+    # Keep the quarantine copy after a run for later audit instead of deleting it.
+    keep_copy: bool = False
+
+
+class Capabilities(BaseModel):
+    rea: CapabilityRea = Field(default_factory=CapabilityRea)
+
+
 def _default_video_codec() -> str:
     if sys.platform in ("darwin", "win32"):
         return "libx264"  # no VAAPI render nodes off Linux; see MediaTranscodeTool
@@ -142,6 +166,7 @@ class Settings(BaseSettings):
     openai: ProviderOpenAI = Field(default_factory=ProviderOpenAI)
     local: ProviderLocal = Field(default_factory=ProviderLocal)
     guardrails: Guardrails = Field(default_factory=Guardrails)
+    capabilities: Capabilities = Field(default_factory=Capabilities)
     paths: Paths = Field(default_factory=Paths)
     media: Media = Field(default_factory=Media)
 
@@ -193,6 +218,13 @@ def validate_settings(s: Settings) -> None:
     unknown = set(g.shell_extra_modes) - set(g.shell_allowlist)
     if unknown:
         errs.append(f"shell_extra_modes references binaries not in shell_allowlist: {sorted(unknown)}")
+    rea = s.capabilities.rea
+    if os.sep in rea.binary or "\\" in rea.binary or any(c.isspace() for c in rea.binary):
+        errs.append(f"capabilities.rea.binary must be a bare name: {rea.binary!r}")
+    for tok in rea.command_prefix:
+        if (not tok or any(c.isspace() for c in tok) or ".." in tok
+                or any(c in tok for c in ";&|<>`$")):
+            errs.append(f"capabilities.rea.command_prefix has an invalid token: {tok!r}")
     for pat in g.deny_globs:
         if not isinstance(pat, str) or not pat.strip():
             errs.append(f"deny_globs contains an empty/invalid pattern: {pat!r}")

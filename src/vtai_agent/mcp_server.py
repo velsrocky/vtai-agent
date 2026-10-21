@@ -15,6 +15,7 @@ from .tools import (
     DelegateCodingTool,
     AutoModeTool,
     DiskAuditTool,
+    InspectApplicationTool,
     MediaTranscodeTool,
     OrganizeFilesTool,
     ShellTool,
@@ -36,6 +37,7 @@ def register_tools() -> None:
     registry.register(DiskAuditTool())
     registry.register(DelegateCodingTool())
     registry.register(AutoModeTool())
+    registry.register(InspectApplicationTool())
 
 
 def build_server() -> MCPServer:
@@ -228,6 +230,33 @@ def build_server() -> MCPServer:
         return await _call("auto_mode", {
             "goal": goal, "working_dir": working_dir, "cli": cli,
             "max_iterations": max_iterations, "timeout": timeout, "dry_run": dry_run,
+        })
+
+    @server.tool()
+    async def inspect_application(goal: str, target: str,
+                                  judge: bool = True,
+                                  keep_copy: bool | None = None,
+                                  timeout: float | None = None,
+                                  dry_run: bool | None = None) -> str:
+        """Analyze a local application with REA (reverse engineering) under
+        full guardrails. The target is deny-glob checked, copied into a
+        quarantine dir, analyzed there (REA capability must be enabled in
+        config), and the returned evidence carries an audit digest. The
+        original target is never touched.
+
+        Args:
+            goal: What you want to learn from the target app.
+            target: Path to the app (directory, ASAR, or binary).
+            judge: Verify the evidence answers the goal with the judge model.
+            keep_copy: Keep the quarantine copy after the run for audit.
+            timeout: Seconds before REA is killed (config default: 1800).
+            dry_run: Preview the plan without running REA.
+        """
+        return await _call("inspect_application", {
+            "goal": goal, "target": target, "judge": judge,
+            **({"keep_copy": keep_copy} if keep_copy is not None else {}),
+            **({"timeout": timeout} if timeout is not None else {}),
+            "dry_run": dry_run,
         })
 
     return server

@@ -7,10 +7,11 @@ from .media import MediaTranscodeTool
 from .disk import DiskAuditTool
 from .delegate import DelegateCodingTool
 from .automode import AutoModeTool
+from .rea import InspectApplicationTool
 
 __all__ = [
     "Tool", "ToolError", "ToolResult", "ToolRegistry", "registry",
     "OrganizeFilesTool", "ShellTool", "SystemInfoTool",
     "BackupSyncTool", "MediaTranscodeTool", "DiskAuditTool",
-    "DelegateCodingTool", "AutoModeTool",
+    "DelegateCodingTool", "AutoModeTool", "InspectApplicationTool",
 ]

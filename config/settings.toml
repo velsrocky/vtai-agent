@@ -68,6 +68,19 @@ trusted_bin_dirs = [
 [guardrails.shell_extra_modes]
 pytest = "write"
 
+[capabilities.rea]
+# REA (github.com/morluto/rea) static analysis of apps, driven by the
+# inspect_application tool. Deliberately OFF: REA never analyzes anything but
+# a quarantined copy (deny-glob entries inside the tree are skipped), gets a
+# minimal child environment, and every run's evidence digest is audited.
+# Enable only after installing rea-agents from the official sources:
+#   npx / npm: `npm install --global rea-agents`  (verify provenance!)
+enabled        = false
+binary         = "rea"
+command_prefix = ["analyze-javascript-application"]
+timeout        = 1800.0
+keep_copy      = false   # true = keep the quarantine copy for later audit
+
 [paths]
 # Roots the agent may write to. Anything outside is rejected.
 writable_roots = [
