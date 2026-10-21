@@ -353,7 +353,10 @@ a sha256 evidence digest plus REA's evidence id are written to the audit
 trail; the optional judge pass (same model and fail-closed policy as
 auto_mode) verifies the evidence answers the goal before the result reports
 success. The original target is never touched, and the quarantine copy is
-deleted unless `keep_copy` is true.
+deleted unless `keep_copy` is true. Live-validated 2026-10-21 against the
+real `rea` 6.7.0 CLI on a real JS app — spawn, `--json` envelope, and
+evidence digits all confirmed; see
+`docs/showcases/rea-live-validation.md`.
 
 ```bash
 uv run vtai run inspect_application \
