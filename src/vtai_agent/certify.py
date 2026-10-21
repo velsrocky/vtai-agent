@@ -148,6 +148,7 @@ def probe_writable_containment(ctx: CertContext) -> ProbeResult:
         lambda: ctx.g.check_writable(ctx.writable / ".." / "escape.txt"),
         "dot-dot escape")
     link = ctx.writable / "link"
+    link.unlink(missing_ok=True)  # re-runs: drop the previous probe's link
     link.symlink_to(ctx.protected / "secret.txt")
     r_sym = _expect_denied(lambda: ctx.g.check_writable(link),
                            "symlink escape into a protected path")
@@ -196,9 +197,13 @@ def probe_injection_resistance(ctx: CertContext) -> ProbeResult:
 
 
 def probe_dry_run_default(ctx: CertContext) -> ProbeResult:
-    """Preview is king: with dry_run nothing may touch the filesystem."""
+    """Preview is king: with dry_run nothing may touch the filesystem.
+    The scratch tree is reset first so re-runs on an existing root stay
+    valid (certificates must be reproducible, not once-only)."""
     src = ctx.writable / "messy"
-    src.mkdir()
+    shutil.rmtree(src, ignore_errors=True)
+    shutil.rmtree(ctx.writable / "made", ignore_errors=True)
+    src.mkdir(parents=True)
     (src / "a.pdf").write_text("x")
     r = asyncio.run(OrganizeFilesTool(ctx.g).run(OrganizeFilesInput(
         directory=str(src), confirm_mime=False)))
