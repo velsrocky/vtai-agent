@@ -380,6 +380,7 @@ refused, and the spend:
 
 ```bash
 uv run vtai runs            # list runs
+uv run vtai runs --summary  # aggregate: spend percentiles, tool counts, denial codes (JSON with --json)
 uv run vtai show 193        # one run in full
 ```
 

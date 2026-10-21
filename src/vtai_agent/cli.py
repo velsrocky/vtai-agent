@@ -436,7 +436,14 @@ def cmd_audit(args) -> int:
 
 
 def cmd_runs(args) -> int:
-    runs = db.list_runs(limit=args.limit)
+    if args.summary:
+        summ = db.summarize_runs(limit=args.limit or 500)
+        if args.json:
+            print(json.dumps(summ, indent=2, default=str))
+        else:
+            print(db.format_runs_summary(summ))
+        return 0
+    runs = db.list_runs(limit=args.limit or 20)
     if args.status:
         runs = [r for r in runs if r.status == args.status]
     if args.grep:
@@ -478,9 +485,13 @@ def build_parser() -> argparse.ArgumentParser:
     g.set_defaults(func=cmd_goal)
 
     r2 = sub.add_parser("runs", help="List recent runs")
-    r2.add_argument("--limit", type=int, default=20)
+    r2.add_argument("--limit", type=int, default=None)
     r2.add_argument("--status", help="ok | failed | aborted | budget_exceeded | running")
     r2.add_argument("--grep", help="Case-insensitive substring on goal")
+    r2.add_argument("--summary", action="store_true",
+                    help="Aggregate instead of listing: spend percentiles, "
+                         "tool counts, denial codes (over --limit runs)")
+    r2.add_argument("--json", action="store_true", help="With --summary: raw JSON")
     r2.set_defaults(func=cmd_runs)
 
     sh = sub.add_parser("show", help="Show one run in full: steps, audit trail, spend")

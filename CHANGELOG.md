@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **`vtai runs --summary`** — the aggregate view the per-run listing never
+  gave you: over the last `--limit` runs (default 500), measured status
+  split with dry-run-first share, spend distribution (total across
+  measured runs, mean, p50, p95), completion-duration percentiles, tool
+  call counts with ok/failed split, and — reading the audit trail through
+  the `E_*` error taxonomy — which fail-closed codes the guardrails
+  actually fired and how often. `--json` prints the raw structure for
+  dashboards. Denial codes for rows predating 0.6.6 show as "no codes"
+  (the audit trail is immutable, not re-labeled).
+
 ## [0.6.6] - 2026-10-21
 
 ### Added

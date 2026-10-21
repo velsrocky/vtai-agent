@@ -194,6 +194,140 @@ def list_audit_rows(run_id: int, limit: int = 200) -> list[AuditLog]:
         return rows
 
 
+def summarize_runs(limit: int = 500) -> dict:
+    """Aggregate the last `limit` runs into benchmark-shaped numbers: status
+    split, spend distribution, tool-call counts, and — via the error
+    taxonomy — which fail-closed codes the guardrails actually fired.
+
+    Evidence over claims: every field is a measurement, not an opinion.
+    """
+    import re
+
+    from collections import Counter
+
+    def _percentile(sorted_vals: list[float], q: float) -> float | None:
+        if not sorted_vals:
+            return None
+        idx = q * (len(sorted_vals) - 1)
+        lo, hi = int(idx // 1), int(-(-idx // 1))  # floor / ceil
+        return sorted_vals[lo] if lo == hi else sorted_vals[lo] + (
+            sorted_vals[hi] - sorted_vals[lo]) * (idx - lo)
+
+    with session_scope() as s:
+        runs = list(s.exec(select(Run).order_by(Run.id.desc()).limit(limit)))
+        if not runs:
+            return {"window": {"runs": 0}}
+        window_start = min((r.started_at for r in runs if r.started_at), default=None)
+        ids = [r.id for r in runs]
+
+        status_counts = Counter(r.status for r in runs)
+        dry_share = round(100 * sum(1 for r in runs if r.dry_run) / len(runs))
+
+        costs = sorted((r.cost_usd for r in runs if r.cost_usd > 0.0))
+        durations = sorted(
+            (r.finished_at - r.started_at).total_seconds()
+            for r in runs
+            if r.started_at and r.finished_at and r.finished_at >= r.started_at
+        )
+
+        tool_counts: Counter[str] = Counter()
+        tool_status: dict[str, Counter[str]] = {}
+        steps = s.exec(select(Step).where(Step.run_id.in_(ids))).all()
+        for st in steps:
+            tool_counts[st.tool] += 1
+            tool_status.setdefault(st.tool, Counter())[st.status or "none"] += 1
+
+        denials_by_code: Counter[str] = Counter()
+        denials_by_action: Counter[str] = Counter()
+        if window_start is not None:
+            denied = s.exec(
+                select(AuditLog).where(
+                    AuditLog.allowed == False,  # noqa: E712 — needed by sqlmodel filter
+                    AuditLog.created_at >= window_start)
+            ).all()
+            for a in denied:
+                denials_by_action[a.action] += 1
+                for code in re.findall(r"\[code=(E_[A-Z_]+)\]", a.detail):
+                    denials_by_code[code] += 1
+
+        return {
+            "window": {
+                "runs": len(runs),
+                "oldest": (runs[-1].started_at.isoformat()
+                           if runs[-1].started_at else None),
+                "newest": (runs[0].started_at.isoformat()
+                           if runs[0].started_at else None),
+            },
+            "status_counts": dict(status_counts),
+            "dry_run_share_pct": dry_share,
+            "spend": {
+                "total_usd": round(sum(costs), 6),
+                "measured_runs": len(costs),
+                "mean_usd": round(sum(costs) / len(costs), 6) if costs else 0.0,
+                "p50_usd": _percentile(costs, 0.5),
+                "p95_usd": _percentile(costs, 0.95),
+            },
+            "duration_s": {
+                "completed_runs": len(durations),
+                "p50": round(_percentile(durations, 0.5), 1) if durations else None,
+                "p95": round(_percentile(durations, 0.95), 1) if durations else None,
+            },
+            "tools": {
+                tool: {
+                    "calls": n,
+                    "ok": tool_status[tool].get("ok", 0),
+                    "failed": tool_status[tool].get("failed", 0),
+                }
+                for tool, n in tool_counts.most_common()
+            },
+            "denials": {
+                "total": sum(denials_by_action.values()),
+                "by_action": dict(denials_by_action.most_common()),
+                "by_code": dict(denials_by_code.most_common()),
+            },
+        }
+
+
+def format_runs_summary(summ: dict) -> str:
+    """Human one-screen rendering of summarize_runs()."""
+    if summ["window"]["runs"] == 0:
+        return "no runs yet"
+    w = summ["window"]
+    lines = [f"runs summary — {w['runs']} runs "
+             f"({str(w['oldest'])[:16]} .. {str(w['newest'])[:16]})"]
+    sc = summ["status_counts"]
+    lines.append("  status: " + ", ".join(f"{k} {v}" for k, v in sc.items())
+                 + f" | dry-run-first share {summ['dry_run_share_pct']}%")
+    sp = summ["spend"]
+    if sp["measured_runs"]:
+        lines.append(
+            f"  spend: ${sp['total_usd']:.4f} across {sp['measured_runs']} measured"
+            f" | mean ${sp['mean_usd']:.4f} | p50 ${sp['p50_usd']:.4f}"
+            f" | p95 ${sp['p95_usd']:.4f}")
+    else:
+        lines.append("  spend: no measured spend (dry-run only or CLI not cost-capable)")
+    du = summ["duration_s"]
+    if du["completed_runs"]:
+        lines.append(f"  duration: {du['completed_runs']} completed"
+                     f" | p50 {du['p50']}s | p95 {du['p95']}s")
+    if summ["tools"]:
+        ranked = list(summ["tools"].items())
+        shown = ranked[:8]
+        more = len(ranked) - len(shown)
+        lines.append("  tools: " + " | ".join(
+            f"{t} {d['calls']} (ok {d['ok']})" for t, d in shown)
+            + (f" | +{more} more" if more > 0 else ""))
+    dn = summ["denials"]
+    if dn["total"]:
+        codes = ", ".join(f"{c} {n}" for c, n in dn["by_code"].items()) or "no codes"
+        lines.append(f"  denials: {dn['total']} — {codes}"
+                     + (" | by action: " + ", ".join(
+                         f"{k} {v}" for k, v in dn["by_action"].items())))
+    else:
+        lines.append("  denials: none in window")
+    return "\n".join(lines)
+
+
 # ---------- pending approvals (delegate_coding human gate) ----------
 def create_pending_approval(run_id: int | None, cli: str, prompt: str,
                             working_dir: str, snapshot: str, orig_index: str,
