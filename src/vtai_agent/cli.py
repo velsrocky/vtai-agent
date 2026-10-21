@@ -522,7 +522,36 @@ def build_parser() -> argparse.ArgumentParser:
     vs.add_argument("--check", action="store_true",
                     help="Report drift without copying (exit 1 when out of sync)")
     vs.set_defaults(func=cmd_voice_sync)
+
+    c = sub.add_parser("certify", help="Run the guardrail-compliance suite (vtai-cert)")
+    c.add_argument("--out", default=None,
+                   help="Write the signed certificate JSON to this path "
+                        "(default: <data_dir>/certificates/)")
+    c.add_argument("--json", action="store_true", help="Print raw certificate JSON")
+    c.set_defaults(func=cmd_certify)
     return p
+
+
+def cmd_certify(args) -> int:
+    """Emit the vtai-cert certificate. Exit 0 iff every requirement holds;
+    a non-zero verdict is a finding, not a crash."""
+    from .certify import format_report, run_certification
+
+    default_out = get_settings().data_dir / "certificates"  # capture BEFORE the harness swaps globals
+    out: Path | None = Path(args.out).expanduser() if args.out else None
+    cert = run_certification()
+
+    if args.json:
+        print(json.dumps(cert, indent=2, sort_keys=True))
+    else:
+        print(format_report(cert))
+    out = out or default_out
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = cert["generated_at"].replace(":", "").replace("-", "")[:15]
+    path = out / f"vtai-cert-{cert['profile'].replace('@', '-')}-{stamp}.json"
+    path.write_text(json.dumps(cert, indent=2, sort_keys=True))
+    print(f"certificate written to {path}")
+    return 0 if cert["all_passed"] else 1
 
 
 def main() -> None:

@@ -212,6 +212,14 @@ mcp-publisher auth --oauth2-github
 mcp-publisher publish server.json
 ```
 
+## Certification (vtai-cert)
+
+Safety claims are probes, not prose: `vtai certify` runs the executable
+guardrail-compliance suite (deny-glob containment, dotdot/symlink escapes,
+fail-closed shell, injected-argv resistance, dry-run-first, kill switch,
+audit exactness, echo-loop breaker) and emits a digest-stamped certificate;
+exit 0 gates the release in CI. See [docs/certification.md](docs/certification.md).
+
 ## HTTP transport
 
 `vtai serve --transport http --port 8765 --token $VT_HTTP_TOKEN` exposes the

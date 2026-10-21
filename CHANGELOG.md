@@ -252,6 +252,17 @@
   is complemented by a machine-counterpart test.
 
 ### Added
+- **vtai-cert — executable guardrail-compliance suite (phase 3)**
+  (`src/vtai_agent/certify.py`, `vtai certify`): eight adversarial
+  requirements R1–R8 (deny-glob protection, writable containment incl.
+  symlink/dotdot escapes, fail-closed shell with stable codes, injected-argv
+  resistance, dry-run-first, kill switch, audit-row exactness, echo-loop
+  breaker) run against an isolated harness environment and emit a
+  digest-stamped JSON certificate (`~/.vtaiagent/certificates/`); exit 0
+  only when all hold. `suite_digest` binds the verdict set (stable across
+  runs); per-run `digest` binds the whole timestamped payload. Spec +
+  claim boundary in `docs/certification.md`; pytest twin in
+  `tests/test_certify.py` (115 tests total).
 - **Distribution & reach (phase 2)**: MCP-registry manifest `server.json`
   (`io.github.velsrocky/vtai-agent`, pypi package, stdio) + the
   `<!-- mcp-name: ... -->` proof comment in README; PyPI Trusted Publishing
