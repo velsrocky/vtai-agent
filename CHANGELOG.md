@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+- **CI Python matrix** (3.12 / 3.13 / 3.14, all three OSes): the release
+  floor is now enforced live on every push. Lesson source: 0.6.7's
+  `requires-python >=3.14` metadata bug was invisible to a single-Python
+  CI and only surfaced in a third-party install.
+- **Registry publish automation**: `publish.yml` now lists the server in
+  the official MCP registry via GitHub Actions OIDC (`mcp-publisher` 1.8.1,
+  checksum-pinned) after a successful PyPI publish. One tag ships PyPI +
+  the registry; no stored auth, nothing to expire between releases
+  (observed mid-release with the manual ritual).
+
+### Fixed
+- **`vtai runs --summary` surface confusion**: step rows from tools that
+  no longer exist (e.g. `notify` — deleted in 0.3.1 — rendered as "notify
+  184 (ok 0)", reading forever like a live-tool failure) are annotated
+  `not in the current tool registry`, judged against the real registry
+  plus the orchestrator's bookkeeping names. History stays in the trail;
+  confusion does not.
+
 ## [0.6.8] - 2026-10-21
 
 ### Fixed

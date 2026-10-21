@@ -167,3 +167,20 @@ def test_judge_renders_one_line_per_provider(sandbox):
     out = db.format_runs_summary(db.summarize_runs(limit=50))
     assert "judge[opencode]: 1 calls | verdicts ok 2 | iters mean 2.0 max 2" in out
     assert "judge[claude]: 1 calls | verdicts error 1 insufficient 1" in out
+
+
+def test_summary_flags_step_rows_from_retired_tools(sandbox):
+    """Retired-tool rows (e.g. notify, deleted in 0.3.1) must not read as
+    live-tool failures; the renderer says which names are not registered."""
+    r1 = db.start_run("old surface", dry_run=False, provider="local")
+    db.log_step(r1, 0, "notify", "{}", "", "failed")
+    db.log_step(r1, 1, "run_shell", "{}", "", "ok")
+    db.finish_run(r1, "ok")
+
+    s = db.summarize_runs(limit=50)
+    rendered = db.format_runs_summary(s, known_tools={"run_shell"})
+    assert "not in the current tool registry: notify" in rendered
+    assert "run_shell 1 (ok 1)" in rendered
+    # without the registry, the render stays raw — the annotation only
+    # appears when a caller can prove what "current" is
+    assert "not in the current tool registry" not in db.format_runs_summary(s)

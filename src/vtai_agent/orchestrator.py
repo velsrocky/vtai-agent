@@ -28,6 +28,11 @@ from .guardrails import (
 from .providers import build_model, describe_active, estimate_cost
 from .tools import ToolError, registry
 
+# Orchestrator-emitted step names that are bookkeeping, not registry tools.
+# runs --summary annotates retired/foreign tools against the registry; these
+# names are current by construction and must never be flagged as retired.
+BOOKKEEPING_TOOLS = ("final_answer", "malformed_call")
+
 
 _MACHINE_OS = {
     "Linux": "Linux", "Darwin": "macOS", "Windows": "Windows",
@@ -251,7 +256,7 @@ class Orchestrator:
                         "and nothing else, or, if you are finished, a plain "
                         "prose answer with no JSON at all."
                     )
-                    db.log_step(run_id, step, "malformed_call",
+                    db.log_step(run_id, step, BOOKKEEPING_TOOLS[1],
                                 text[:2000], note[:2000], "failed")
                     errors.append(f"malformed tool call at step {step + 1}")
                     prompt = note
@@ -259,7 +264,8 @@ class Orchestrator:
                 if call is None:
                     status = "ok"
                     final_answer = text
-                    db.log_step(run_id, step, "final_answer", goal, text[:2000], "ok")
+                    db.log_step(run_id, step, BOOKKEEPING_TOOLS[0],
+                            goal, text[:2000], "ok")
                     break
 
                 db.log_step(run_id, step, call.tool, json.dumps(call.args)[:2000], "", "running")

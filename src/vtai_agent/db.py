@@ -341,8 +341,12 @@ def summarize_runs(limit: int = 500) -> dict:
         }
 
 
-def format_runs_summary(summ: dict) -> str:
-    """Human one-screen rendering of summarize_runs()."""
+def format_runs_summary(summ: dict,
+                        known_tools: set[str] | None = None) -> str:
+    """Human one-screen rendering of summarize_runs(). `known_tools` (the
+    current registry's tool names, supplied by the caller) lets the summary
+    flag step rows for tools that no longer exist — immutable history
+    otherwise presents a retired tool as if it were live."""
     if summ["window"]["runs"] == 0:
         return "no runs yet"
     w = summ["window"]
@@ -370,6 +374,15 @@ def format_runs_summary(summ: dict) -> str:
         lines.append("  tools: " + " | ".join(
             f"{t} {d['calls']} (ok {d['ok']})" for t, d in shown)
             + (f" | +{more} more" if more > 0 else ""))
+    unknown = ([t for t in summ["tools"]
+                if known_tools is not None and t not in known_tools]
+               if known_tools is not None else [])
+    if unknown:
+        lines.append(
+            "  note: not in the current tool registry: "
+            + ", ".join(unknown)
+            + " (steps from a retired or foreign surface; history is "
+              "kept, live tools are what the registry holds)")
     for prov, jd in list(summ["judge"].items())[:3]:
         parts = [f"  judge[{prov}]: {jd['steps']} calls"]
         if jd["unparsed"]:

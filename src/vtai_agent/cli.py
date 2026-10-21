@@ -441,7 +441,12 @@ def cmd_runs(args) -> int:
         if args.json:
             print(json.dumps(summ, indent=2, default=str))
         else:
-            print(db.format_runs_summary(summ))
+            register_tools()
+            # lazy import: orchestrator pulls in providers/pydantic_ai
+            from .orchestrator import BOOKKEEPING_TOOLS
+            print(db.format_runs_summary(
+                summ,
+                known_tools=set(registry.all()) | set(BOOKKEEPING_TOOLS)))
         return 0
     runs = db.list_runs(limit=args.limit or 20)
     if args.status:
