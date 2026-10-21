@@ -209,9 +209,15 @@ def test_judge_ok_and_insufficient_plumb_through(sandbox, fake_rea, monkeypatch)
 def test_non_json_output_survives(rea_enabled, tmp_path, monkeypatch):
     fakebin = tmp_path / "fakebin2"
     fakebin.mkdir()
-    (fakebin / "rea").write_text("#!/usr/bin/env bash\necho 'not json'\n")
-    (fakebin / "rea").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{fakebin}:{os.environ.get('PATH', '')}")
+    if os.name == "nt":                       # same platform shape as fake_rea
+        script = fakebin / "rea.cmd"
+        script.write_text("@echo off\necho not json\n")
+    else:
+        script = fakebin / "rea"
+        script.write_text("#!/usr/bin/env bash\necho 'not json'\n")
+        script.chmod(0o755)
+    monkeypatch.setenv("PATH",
+                       str(fakebin) + os.pathsep + os.environ.get("PATH", ""))
     app = _app_tree(rea_enabled.writable)
     r = asyncio.run(_tool(rea_enabled).run(InspectApplicationInput(
         goal="g", target=str(app), judge=False, dry_run=False)))
