@@ -193,7 +193,7 @@ uv tool install --editable /path/to/vtai-agent   # -> ~/.local/bin/vtai
 ```
 
 Install into another project as a dependency with
-`uv add git+https://github.com/velsrocky/vtai-agent@v0.6.7`, or pull the
+`uv add git+https://github.com/velsrocky/vtai-agent@v0.6.8`, or pull the
 image with `docker build -t vtai-agent .`.
 
 ## Registry & distribution

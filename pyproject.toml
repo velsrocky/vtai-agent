@@ -1,6 +1,6 @@
 [project]
 name = "vtai-agent"
-version = "0.6.7"
+version = "0.6.8"
 description = "VT-AIAgent — system-automation agent exposed as an MCP server for opencode/claude/pi"
 readme = "README.md"
 license = "MIT"
@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 urls = { repository = "https://github.com/velsrocky/vtai-agent", issues = "https://github.com/velsrocky/vtai-agent/issues", changelog = "https://github.com/velsrocky/vtai-agent/blob/main/CHANGELOG.md" }
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "mcp>=2.2.0",
     "pydantic>=2.13.5",

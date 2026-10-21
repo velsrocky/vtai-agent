@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-10-21
+
+### Fixed
+- **`requires-python` floor corrected from `>=3.14` to `>=3.12`.** The
+  0.6.7 publish (first Trusted-Publisher release, validated the OIDC
+  pipeline end-to-end) inherited the authoring machine's Python as its
+  floor, making the package invisible to every 3.12/3.13 user — caught by
+  the third-party install smoke (`uvx --from vtai-agent==0.6.7`), not the
+  CI pipeline. The new floor is measured: the full suite (180 tests)
+  passes on 3.12.15 and 3.13.16 before this release was cut.
+- The same smoke surfaced the Trusted Publisher's real payoff: 0.6.7's
+  files on pypi.org carry upload provenance (`data-provenance` linking
+  the artifact to its GitHub Actions build) — the fix release inherits
+  that property.
+
 ## [0.6.7] - 2026-10-21
 
 ### Added
