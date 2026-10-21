@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.velsrocky/vtai-agent",
-  "description": "VT-AIAgent: system-automation agent exposed as an MCP server for opencode/claude/pi. Guarded machine control \u2014 sandboxed allowlisted shell, dry-run-first file tools, backups, media transcode, disk audit, delegate coding with verify+rollback, and REA-powered static analysis (inspect_application). Every allow and deny is audited.",
+  "description": "System-automation agent MCP server for opencode/claude/pi: guarded shell, dry-run-first, audited.",
   "version": "0.6.6",
   "repository": {
     "url": "https://github.com/velsrocky/vtai-agent",
