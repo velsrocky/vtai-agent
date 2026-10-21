@@ -12,6 +12,11 @@ on:
 jobs:
   smoke:
     runs-on: windows-latest
+    env:
+      # The checked-in config/settings.toml is another machine's production
+      # config (unix paths). Point the runner at a per-machine config and
+      # provision it with `vtai init` — never touch the repo's own.
+      VT_CONFIG: "~/.vtaiagent/settings.toml"
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +28,9 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --dev
+
+      - name: Provision per-machine config
+        run: uv run vtai init
 
       - name: Tool surface loads
         run: uv run vtai tools
