@@ -4,7 +4,7 @@ attribute. Judges react to codes; prose stays authoritative."""
 
 import asyncio
 import os
-import stat
+import shutil
 
 import pytest
 
@@ -70,12 +70,20 @@ def test_bin_missing_code(sandbox):
 
 
 def test_bin_untrusted_code(sandbox, tmp_path, monkeypatch):
-    fakebin = tmp_path / "shadowbin"
-    fakebin.mkdir()
-    script = fakebin / "ls"
-    script.write_text("#!/bin/sh\ntrue\n")
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("PATH", f"{fakebin}:{os.environ.get('PATH', '')}")
+    """The trust boundary is about WHERE the binary resolves, not its name.
+    faking which() (house pattern: hermetic CLI mocks) instead of PATH games
+    keeps the test unchanged across Windows PATH/PATHEXT semantics."""
+    shadow = tmp_path / "shadow" / ("ls.exe" if os.name == "nt" else "ls")
+    shadow.parent.mkdir()
+    shadow.write_text("x")
+    real_which = shutil.which
+
+    def fake_which(name, *a, **k):
+        if name == "ls":
+            return str(shadow)
+        return real_which(name, *a, **k)
+
+    monkeypatch.setattr("vtai_agent.guardrails.shutil.which", fake_which)
     d = _g(sandbox).check_shell("ls", base_dir=None)
     assert d.allowed is False and "[code=E_SHELL_BIN_UNTRUSTED]" in d.reason
 

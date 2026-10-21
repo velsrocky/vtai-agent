@@ -47,6 +47,11 @@
   `[capabilities.rea] enabled = true` (binary, CLI subcommand prefix,
   timeout, and `keep_copy` are configurable; `validate_settings` rejects
   path strings and shell metacharacters in the prefix).
+- **Case studies** (`docs/showcases/`): three evidence-linked write-ups of
+  the product's differentiating behavior — delegate fail-closed catching
+  the "exit 0 with no changes" phantom edit, voice-mode reliability
+  discipline against hostile microphone conditions, and the vtai-cert
+  incidents that made the suite trustworthy.
 
 ## [0.6.5] - 2026-10-20
 

@@ -21,6 +21,16 @@ cat <<'JSON'
 JSON
 """
 
+# Windows sibling of the same fake: a .cmd batch shim (npm installs REA as
+# rea.cmd there). Redirect-first form avoids cmd's digit-swallowing redirect
+# parse; one arg per line matches the POSIX fake's argvlog shape.
+FAKE_REA_BODY_NT = """@echo off
+>"{argvlog}" echo %~1
+>>"{argvlog}" echo %~2
+>>"{argvlog}" echo %~3
+echo {{"evidence_id": "{evid}", "normalized_result": {{"modules": ["app/main.js"]}}}}
+"""
+
 
 def _g(sandbox) -> Guardrails:
     return Guardrails(sandbox.cfg, sandbox.settings)
@@ -40,10 +50,12 @@ def fake_rea(rea_enabled, tmp_path, monkeypatch):
     fakebin = tmp_path / "fakebin"
     fakebin.mkdir()
     argvlog = tmp_path / "rea-argv.log"
-    script = fakebin / "rea"
-    script.write_text(FAKE_REA_BODY.format(argvlog=argvlog, evid="ev-fake-1"))
+    body = (FAKE_REA_BODY_NT if os.name == "nt" else FAKE_REA_BODY)
+    script = fakebin / ("rea.cmd" if os.name == "nt" else "rea")
+    script.write_text(body.format(argvlog=argvlog, evid="ev-fake-1"))
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("PATH", f"{fakebin}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("PATH",
+                       str(fakebin) + os.pathsep + os.environ.get("PATH", ""))
     return SimpleNamespace(bin=fakebin, argvlog=argvlog)
 
 
@@ -139,10 +151,13 @@ def test_keep_copy_preserves_quarantine(sandbox, fake_rea):
 
 
 def test_denied_entries_never_reach_the_copy(sandbox, fake_rea):
-    sandbox.cfg.deny_globs.append("**/.env")
     app = _app_tree(sandbox.writable)
+    try:
+        (app / "broken.lnk").symlink_to(sandbox.protected / "missing")
+    except OSError:
+        pytest.skip("symlink creation requires privilege on this platform")
+    sandbox.cfg.deny_globs.append("**/.env")
     (app / ".env").write_text("SECRET=1")
-    (app / "broken.lnk").symlink_to(sandbox.protected / "missing")
     r = asyncio.run(_tool(sandbox).run(InspectApplicationInput(
         goal="g", target=str(app), judge=False, keep_copy=True, dry_run=False)))
     assert r.ok
@@ -155,7 +170,10 @@ def test_denied_entries_never_reach_the_copy(sandbox, fake_rea):
 
 def test_symlink_into_protected_never_copies(sandbox, fake_rea):
     app = _app_tree(sandbox.writable)
-    (app / "ssh_link").symlink_to(sandbox.protected)
+    try:
+        (app / "ssh_link").symlink_to(sandbox.protected)
+    except OSError:
+        pytest.skip("symlink creation requires privilege on this platform")
     r = asyncio.run(_tool(sandbox).run(InspectApplicationInput(
         goal="g", target=str(app), judge=False, keep_copy=True, dry_run=False)))
     copy_path = Path(fake_rea.argvlog.read_text().splitlines()[1])

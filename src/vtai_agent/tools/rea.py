@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 from .. import db
 from ..config import CapabilityRea, Settings, get_settings
 from ..errors import suffix as _code_suffix
+from .registry import resolve_cli_argv
 from ..guardrails import Guardrails
 from .automode import AutoModeTool
 from .registry import Tool, ToolError, ToolResult
@@ -43,7 +44,8 @@ from .registry import Tool, ToolError, ToolResult
 def _child_env() -> dict[str, str]:
     """Minimal environment, same policy as run_shell: children never inherit
     API keys or tokens."""
-    keep = ("LC_ALL", "TZ", "DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+    keep = ("LC_ALL", "TZ", "DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
+            "SystemRoot", "SystemDrive")  # Windows children need these to load
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
            "HOME": str(Path.home()),
            "LANG": os.environ.get("LANG", "C.UTF-8")}
@@ -111,7 +113,7 @@ class InspectApplicationTool(Tool[InspectApplicationInput]):
                 "[capabilities.rea] enabled=true first"
                 f"{_code_suffix('E_CAP_DISABLED')}",
                 code="E_CAP_DISABLED")
-        resolved, argv_prefix = self._resolve_command(cfg)
+        spawn_prefix, argv_prefix, resolved = self._resolve_command(cfg)
 
         target = self.g.check_readable(inp.target)
         if not target.exists():
@@ -149,7 +151,7 @@ class InspectApplicationTool(Tool[InspectApplicationInput]):
                  f"quarantined {stats['files']} entries of '{target.name}' "
                  f"into {qdir}", allowed=True)
 
-        full_argv = [resolved, *argv_prefix, str(qdir / target.name), "--json"]
+        full_argv = [*spawn_prefix, *argv_prefix, str(qdir / target.name), "--json"]
         try:
             stdout, stderr, code = await self._run(full_argv, qdir, timeout)
         except asyncio.TimeoutError:
@@ -203,11 +205,18 @@ class InspectApplicationTool(Tool[InspectApplicationInput]):
 
     # ---------- helpers ----------
 
-    def _resolve_command(self, cfg: CapabilityRea) -> tuple[str, list[str]]:
+    def _resolve_command(self, cfg: CapabilityRea
+                         ) -> tuple[list[str], list[str], str]:
         """Fail-closed resolution, re-checked at call time: bare binary name,
         PATH-resolved, and a command prefix free of paths, whitespace, and
         metacharacters (mirrors validate_settings, since a tool instance may
-        outlive a settings edit)."""
+        outlive a settings edit).
+
+        Returns (spawn argv prefix, policy argv prefix, resolved path).
+        `resolve_cli_argv` keeps the spawn correct per platform (Windows
+        npm-installed binaries are .cmd/.bat shims that CreateProcess
+        cannot exec directly); the policy prefix stays the user's
+        configured [capabilities.rea] command_prefix either way."""
         if os.sep in cfg.binary or "\\" in cfg.binary:
             raise ToolError(
                 f"REA binary must be a bare name, not a path: {cfg.binary!r}"
@@ -220,15 +229,15 @@ class InspectApplicationTool(Tool[InspectApplicationInput]):
                     f"REA command token rejected: {tok!r}"
                     f"{_code_suffix('E_CAP_TOKEN_INVALID')}",
                     code="E_CAP_TOKEN_INVALID")
-        resolved = shutil.which(cfg.binary)
-        if resolved is None:
+        spawn = resolve_cli_argv(cfg.binary)
+        if spawn is None:
             raise ToolError(
                 f"'{cfg.binary}' not found on PATH; install REA only from the "
                 "official sources (github.com/morluto/rea, "
                 f"`npm install --global rea-agents`), then retry"
                 f"{_code_suffix('E_CAP_BIN_MISSING')}",
                 code="E_CAP_BIN_MISSING")
-        return resolved, [*cfg.command_prefix]
+        return spawn, [*cfg.command_prefix], spawn[-1]
 
     def _copy_into_quarantine(self, target: Path, qdir: Path) -> dict[str, int]:
         """Copy the target into qdir, skipping anything that did not itself
