@@ -2158,7 +2158,7 @@ wheels = [
 
 [[package]]
 name = "vtai-agent"
-version = "0.6.8"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },

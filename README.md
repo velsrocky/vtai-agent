@@ -71,6 +71,12 @@ The agent reads one TOML file. **Which** one is resolved in this order:
 2. `config/settings.toml` next to the package (i.e. the clone you just made)
 3. `~/.vtaiagent/settings.toml` — the per-user file
 
+A machine with **no config file anywhere** fails loudly on first use — the
+built-in defaults leave nothing protected (`shell_allowlist` empty) so
+nothing runs, and `vtai info` says so plainly ("no config file there").
+`vtai init` writes a starter config; `vtai init --doctor` runs the full
+preflight right after it.
+
 A fresh clone contains the **maintainer's** config (their provider, their
 writable roots), so point the agent at your own file instead of editing the
 tracked one:
@@ -87,7 +93,8 @@ server) picks it up.
 `~/Documents/vt-data`, and writes a starter config with safe defaults:
 `dry_run_default = true`, `deny_globs` for `~/.ssh`, `~/.gnupg`, `~/.aws` and
 `**/.env`, and writable roots limited to `~/Downloads`, `~/Documents/vt-data`
-and `~/.vtaiagent/tmp`. It is safe to re-run.
+and `~/.vtaiagent/tmp`. Use `vtai init --doctor` to run the preflight
+immediately after writing. It is safe to re-run.
 
 Check which config you ended up with — `vtai info` names the file and its
 origin:

@@ -29,6 +29,20 @@ def _find_config_toml() -> Path:
 CONFIG_TOML = _find_config_toml()
 
 
+def config_toml_path() -> Path:
+    """Re-resolve the config path at call time. CONFIG_TOML is fixed at
+    import time; tests and long-lived processes (the MCP server) must see
+    later VT_CONFIG changes, and `info`/`init` want the always-current
+    answer."""
+    env = os.environ.get("VT_CONFIG")
+    if env:
+        return Path(env).expanduser()
+    repo = Path(__file__).resolve().parents[2] / "config" / "settings.toml"
+    if repo.exists():
+        return repo
+    return Path.home() / ".vtaiagent" / "settings.toml"
+
+
 def config_source() -> str:
     """Which of the three locations the active config came from. Surfaced by
     `vtai info` so a user can tell whose settings they are running under:

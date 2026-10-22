@@ -1,26 +1,6 @@
-# VT-AIAgent configuration
-# Top-level tables map to Settings fields. Env overrides use VT_ prefix + __
-# for nesting, e.g. VT_LOCAL__BASE_URL. API keys are read from the standard
-# env vars the coding-agent CLIs use (ANTHROPIC_API_KEY / OPENAI_API_KEY).
-
-active_provider = "local"   # anthropic | openai | local
-
-[anthropic]
-model = "claude-sonnet-4-5"
-# USD per 1k tokens, used for budget_usd_per_run enforcement. Unset = use
-# pydantic-ai's native price table, then 0.0.
-# cost_per_1k_input = 0.003
-# cost_per_1k_output = 0.015
-
-[openai]
-model = "gpt-5"
-# cost_per_1k_input = 0.00125
-# cost_per_1k_output = 0.01
+active_provider = "local"
 
 [local]
-# Any OpenAI-compatible endpoint: llama.cpp server, Ollama, vLLM, LM Studio.
-# Ollama is running at :11434 on this box. The vision model (minicpm-v) is
-# reserved for the perception tier; the planner uses a capable text model.
 base_url = "http://localhost:11434/v1"
 model    = "qwen2.5-coder:7b"
 api_key  = "ollama"
@@ -30,72 +10,34 @@ dry_run_default  = true
 max_steps        = 40
 max_retries      = 3
 budget_usd_per_run = 1.0
-# Echo-loop breaker: after N denials of the identical action within the
-# window, denial messages escalate with a CIRCUIT BREAKER stop-retrying note.
-max_repeat_denials    = 3
-denial_window_seconds = 300
-# Commands the agent is allowed to run via run_shell. argv[0] must be a bare
-# name in this list AND have a sandbox policy in guardrails.py (fail-closed).
-# find/git/systemctl/journalctl/ffmpeg/magick/convert were removed: each can
-# execute arbitrary code or write outside the sandbox. Use the dedicated tools
-# (backup_sync, delegate_coding, transcode_media) for those workflows.
-# free/nproc/rocm-smi/vulkaninfo are Linux-only, vm_stat is macOS-only;
-# missing binaries simply deny with "not found on PATH" elsewhere.
 shell_allowlist = [
-  "ls", "cat", "head", "tail", "wc", "du", "df", "free", "grep",
-  "file", "stat", "mkdir", "mv", "cp", "rsync", "tar", "zip", "unzip",
-  "rocm-smi", "vulkaninfo", "nproc", "uptime", "pytest", "vm_stat",
+  "ls",
+  "cat",
+  "head",
+  "tail",
+  "wc",
+  "du",
+  "df",
+  "free",
+  "grep",
+  "file",
+  "stat",
+  "mkdir",
+  "mv",
+  "cp",
+  "rsync",
+  "tar",
+  "zip",
+  "unzip",
+  "nproc",
+  "uptime",
+  "pytest",
 ]
-# Paths the agent may never touch, even inside writable_roots
-deny_globs = [
-  "~/.ssh/**", "~/.gnupg/**", "~/.aws/**", "~/.config/opencode/**",
-  "~/.claude/**", "~/.opencode/**", "**/.env", "**/.aws",
-]
-# run_shell executes binaries only after shutil.which resolves them under one
-# of these prefixes. This box has Rust coreutils installed by cargo, so
-# ls/cat/cp/mkdir resolve into /usr/lib/cargo/bin/coreutils — same trust class
-# as /usr/local/bin (root-installed package dir). Remove if you drop it.
-# /opt/homebrew/bin is for macOS (Homebrew ffmpeg etc.); missing entries are
-# ignored on machines where they don't exist.
-trusted_bin_dirs = [
-  "/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin", "/usr/lib/cargo/bin",
-]
+deny_globs = ["~/.ssh/**", "~/.gnupg/**", "~/.aws/**", "**/.env"]
 
-# Extend the built-in fail-closed shell policy for allowlisted binaries not
-# covered by guardrails.py. Values: "none" | "read" | "write".
-# pytest is used as delegate_coding verify_command; it runs in the repo dir,
-# which is writable-checked, so "write" is safe.
 [guardrails.shell_extra_modes]
 pytest = "write"
 
-[capabilities.rea]
-# REA (github.com/morluto/rea) static analysis of apps, driven by the
-# inspect_application tool. Deliberately OFF: REA never analyzes anything but
-# a quarantined copy (deny-glob entries inside the tree are skipped), gets a
-# minimal child environment, and every run's evidence digest is audited.
-# Enable only after installing rea-agents from the official sources:
-#   npx / npm: `npm install --global rea-agents`  (verify provenance!)
-enabled        = false
-binary         = "rea"
-command_prefix = ["analyze-javascript-application"]
-timeout        = 1800.0
-keep_copy      = false   # true = keep the quarantine copy for later audit
-
 [paths]
-# Roots the agent may write to. Anything outside is rejected.
-writable_roots = [
-  "~/Downloads", "~/Documents/vt-data", "~/.vtaiagent/tmp",
-]
-data_dir = "~/.vtaiagent"   # sqlite db, audit log, screenshots
-
-[media]
-# VAAPI render node for GPU transcoding (card1 = RX 6700 XT dGPU).
-# Falls back to software encoding if the device is missing or fails.
-# macOS/Windows have no VAAPI: the code default is libx264 there (see
-# config.py); an explicit codec here still overrides per machine.
-vaapi_device = "/dev/dri/renderD128"
-video_codec  = "h264_vaapi"   # h264_vaapi | hevc_vaapi | av1_vaapi | libx264 ...
-container    = "mkv"
-# Directories named exactly this are treated as transcode output and are
-# skipped as sources, so the agent never re-encodes its own output.
-output_dir_name = "transcoded"
+writable_roots = ["~/Downloads", "~/Documents/vt-data", "~/.vtaiagent/tmp"]
+data_dir = "~/.vtaiagent"

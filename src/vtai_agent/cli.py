@@ -176,15 +176,34 @@ def cmd_init(args) -> int:
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
-    print("\nNext: uv run vtai info && uv run vtai goal --dry-run \"list my Downloads\"")
+    print(
+        "\nNext (the README's quick start, in commands):\n"
+        "  1. vtai doctor\n"
+        "     # preflight — notably: is the planner/judge model reachable?\n"
+        "     #   local: start Ollama \u2022 cloud: set VT_ACTIVE_PROVIDER and the\n"
+        "     #   API key (ANTHROPIC_API_KEY / OPENAI_API_KEY) in .env\n"
+        "  2. vtai tools                          # what the agent can do\n"
+        '  3. vtai goal --dry-run "list my Downloads"  # the loop, nothing executed\n'
+        "  4. scripts/register-mcp.sh (checkout)  # expose tools to opencode/claude/pi\n"
+    )
+    if getattr(args, "doctor", False) and rc == 0:
+        # Convenience: the README's verify step immediately after configure.
+        return cmd_doctor(args)
     return rc
 
 
 def cmd_info(_args) -> int:
-    from .config import CONFIG_TOML, config_source
+    from .config import CONFIG_TOML, config_source, config_toml_path
 
     print(f"VT-AIAgent v{__version__}")
     print(f"  config file     : {CONFIG_TOML} ({config_source()})")
+    if not config_toml_path().is_file():
+        # A fresh machine before `vtai init`: the resolution order names a
+        # user-level path that was never written and everything silently
+        # runs on built-in defaults — writable_roots empty, so every write
+        # is denied. Say it out loud instead of pretending this is normal.
+        print("! no config file there — built-in defaults are in effect "
+              "(writable_roots empty); run `vtai init`")
     try:
         s = get_settings()
     except ValueError as e:
@@ -474,6 +493,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     i = sub.add_parser("init", help="Create/validate config, writable roots, data dir")
     i.add_argument("--force", action="store_true", help="Overwrite existing config")
+    i.add_argument("--doctor", action="store_true",
+                   help="Run vtai doctor after a successful init")
     i.set_defaults(func=cmd_init)
 
     r = sub.add_parser("run", help="Invoke a tool directly (JSON params)")

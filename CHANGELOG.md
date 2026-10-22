@@ -1,6 +1,17 @@
 # Changelog
 
-## [0.7.0] - 2026-10-23
+## [Unreleased]
+
+### Added
+- **First-run experience**: `vtai init --doctor` runs the full preflight
+  immediately after writing a starter config; init's footer now walks the
+  README's quick start in commands (doctor first — it is the check that
+  catches an unconfigured model — then `vtai tools`, then the guarded
+  dry-run loop, then MCP registration); `vtai info` stops dressing up a
+  missing config as "user-level" and says plainly: *no config file there,
+  built-in defaults, writable_roots empty — run `vtai init`* (the honest
+  fresh-machine state, where a bare `run_shell` would allow nothing and
+  the old output implied a real settings file existed).
 
 ### Added
 - **CI Python matrix** (3.12 / 3.13 / 3.14, all three OSes): the release
