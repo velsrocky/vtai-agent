@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.0] - 2026-10-23
 
 ### Added
 - **CI Python matrix** (3.12 / 3.13 / 3.14, all three OSes): the release
