@@ -218,6 +218,24 @@ def test_judge_budget_exceeded_fails_closed(sandbox, monkeypatch):
     assert "judge budget exceeded" in critique
 
 
+def test_judge_honors_budget_remaining_param(sandbox, monkeypatch):
+    """The loop passes budget_remaining = config budget - CLI spend. A dead
+    assignment used to overwrite that parameter with the flat config value,
+    so a multi-iteration run never tightened the judge's real budget."""
+    from types import SimpleNamespace
+
+    paid = _paid_settings(sandbox, 10.0)
+    usage = SimpleNamespace(input_tokens=5000, output_tokens=0, cost=None)
+    monkeypatch.setattr("pydantic_ai.Agent", lambda *a, **k: _StaticJudge(_JudgeResult("OK", usage)))
+    tool = AutoModeTool(_g(sandbox), settings=paid, model=object())
+    # $5.00 of judge spend fits the $10 config budget but must exceed the
+    # $0.001 remaining passed by the loop.
+    verdict, critique = asyncio.run(
+        tool._judge("goal", "reply", budget_remaining=0.001))
+    assert verdict == "error"
+    assert "judge budget exceeded" in critique
+
+
 def test_judge_unknown_paid_spend_fails_closed(sandbox, monkeypatch):
     paid = _paid_settings(sandbox, 10.0)
     monkeypatch.setattr(

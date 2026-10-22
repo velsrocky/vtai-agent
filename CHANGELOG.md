@@ -12,8 +12,22 @@
   checksum-pinned) after a successful PyPI publish. One tag ships PyPI +
   the registry; no stored auth, nothing to expire between releases
   (observed mid-release with the manual ritual).
+- **Registry OIDC rehearsal lever**: `workflow_dispatch` on `publish.yml`
+  skips the PyPI job (versions are immutable; a duplicate upload would
+  fail noisily) and fires the registry job alone against the currently
+  listed server. Proven live: the rehearsal reached the registry's
+  business logic and drew its canonical duplicate refusal
+  (`AUTH+SCHEMA PROVEN`), after two real Actions lessons — a dependent
+  job's `if` is never evaluated once an upstream job is skipped unless
+  `!cancelled()` forces it, and `bash -e` aborts on a failing command
+  substitution before a failure classifier can run.
 
 ### Fixed
+- **Judge budget was never tightened mid-run**: `_judge` accepted a
+  `budget_remaining` parameter from the loop (config budget − CLI spend)
+  but a dead assignment overwrote it with the flat config value, so a
+  multi-iteration auto_mode run gave every iteration the full budget.
+  The parameter is honored now; a regression test pins it.
 - **`vtai runs --summary` surface confusion**: step rows from tools that
   no longer exist (e.g. `notify` — deleted in 0.3.1 — rendered as "notify
   184 (ok 0)", reading forever like a live-tool failure) are annotated

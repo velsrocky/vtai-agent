@@ -238,7 +238,6 @@ class AutoModeTool(Tool[AutoModeInput]):
             return "error", f"judge unavailable: {type(e).__name__}: {e}"
         budget = (self.settings.guardrails.budget_usd_per_run
                   if budget_remaining is None else budget_remaining)
-        budget = self.settings.guardrails.budget_usd_per_run
         spent = 0.0
         last_error: Exception | None = None
         for _ in range(_JUDGE_ATTEMPTS):
