@@ -4,10 +4,14 @@ name: Publish to PyPI
 # publish via PyPI Trusted Publishing (OIDC, no tokens in the repo) with
 # build attestations attached. One-time setup: PyPI project "vtai-agent" ->
 # "Publishing" -> add Trusted Publisher for this repo + workflow filename.
+# workflow_dispatch exists as the registry OIDC rehearsal lever: silently
+# skips the PyPI publish and only exercises the registry listing job
+# against whatever server.json currently carries.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch: {}
 
 jobs:
   build:
@@ -45,6 +49,10 @@ jobs:
           if-no-files-found: error
 
   publish:
+    # PyPI publish is a tag-pipeline action only; dispatch runs skip it so
+    # a rehearsal can never re-upload existing files (PyPI versions are
+    # immutable and a duplicate publish fails the run noisily).
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs: [build]
     environment: pypi
@@ -71,7 +79,11 @@ jobs:
   # registry JWTs expired between releases).
   publish-registry:
     runs-on: ubuntu-latest
-    needs: [publish]
+    needs: [build, publish]
+    # On a tag: list only after PyPI actually published (the registry
+    # should only offer artifacts a resolver can fetch). On dispatch:
+    # fire alone — the OIDC rehearsal; PyPI's job is skipped.
+    if: needs.publish.result == 'success' || github.event_name == 'workflow_dispatch'
     permissions:
       id-token: write
       contents: read
