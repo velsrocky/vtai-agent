@@ -68,6 +68,27 @@ _DEFECT_MARKERS = re.compile(
     r"DOESN'T|DOES NOT|DID NOT|NOT)\b")
 
 
+def _aggregate_verdicts(verdicts: list[tuple[str, str]], n: int) -> tuple[str, str]:
+    """Majority rule over a replica panel (n >= 2).
+
+    "ok" requires a strict majority of the panel; a tie or a plurality of
+    objections stays "insufficient" (fail closed — a doubtful reply must
+    cost a probe, not a wrong approval). Soft replica errors aggregate like
+    objections; only an error majority returns "error". Critiques of the
+    rejected replicas are joined for the follow-up prompt.
+    """
+    need = n // 2 + 1
+    error_reasons = [c for v, c in verdicts if v == "error" and c]
+    if len(error_reasons) >= need:
+        return "error", "; ".join(error_reasons)[:1000] or "judge unavailable"
+    oks = sum(1 for v, _ in verdicts if v == "ok")
+    if oks >= need:
+        return "ok", ""
+    crits = [c for v, c in verdicts if v != "ok" and c]
+    return "insufficient", (" | ".join(crits)[:1000]
+                            or "reply did not satisfy the goal")
+
+
 def _parse_verdict(text: str) -> tuple[str, str]:
     """Turn raw judge output into (verdict, critique).
 
@@ -273,7 +294,7 @@ class AutoModeTool(Tool[AutoModeInput]):
                      budget_remaining: float | None = None) -> tuple[str, str]:
         from pydantic_ai import Agent
 
-        from ..providers import build_model, estimate_cost
+        from ..providers import build_model
         try:
             model = self._model if self._model is not None else build_model(self.settings)
             agent = Agent(model=model, system_prompt=_JUDGE_SYSTEM, retries=1)
@@ -282,7 +303,38 @@ class AutoModeTool(Tool[AutoModeInput]):
             return "error", f"judge unavailable: {type(e).__name__}: {e}"
         budget = (self.settings.guardrails.budget_usd_per_run
                   if budget_remaining is None else budget_remaining)
-        spent = 0.0
+        n = max(1, self.settings.auto_mode.judge_replicas)
+        # The dogfood measured single-call verdict variance (identical input,
+        # three trials, three verdicts). A panel of N independent calls with
+        # a majority rule buys verdict stability; every seam fails closed:
+        # less-than-majority ok stays insufficient, and a spend/budget
+        # failure aborts the panel immediately. The spend accumulator is
+        # shared — N replicas can never cost N × budget.
+        spend = {"usd": 0.0}
+        verdicts: list[tuple[str, str]] = []
+        for _ in range(n):
+            verdict, critique = await self._judge_once(
+                agent, goal, reply, budget, spend)
+            if verdict == "fatal":
+                # Money or misconfiguration: stop now, never spend further.
+                return "error", critique
+            verdicts.append((verdict, critique))
+        if n == 1:
+            return verdicts[0]
+        return _aggregate_verdicts(verdicts, n)
+
+    async def _judge_once(self, agent, goal: str, reply: str, budget: float,
+                          spend: dict) -> tuple[str, str]:
+        """One judge replica: run the model (with transient retry) and parse
+        its output.
+
+        Verdicts: "ok" / "insufficient" / "error" (this replica's inference
+        is unusable — aggregated by the panel) / "fatal" (money or money
+        verification failed — the panel must stop; _judge maps it straight
+        to "error"). `spend` accumulates replicas' estimated cost shared
+        across the panel.
+        """
+        from ..providers import estimate_cost
         last_error: Exception | None = None
         for _ in range(_JUDGE_ATTEMPTS):
             try:
@@ -300,14 +352,14 @@ class AutoModeTool(Tool[AutoModeInput]):
             usage = getattr(result, "usage", None)
             est = estimate_cost(self.settings, usage) if usage is not None else None
             if est is None and self.settings.active_provider != "local":
-                return "error", (
+                return "fatal", (
                     f"cannot verify judge spend for provider "
                     f"'{self.settings.active_provider}'; set cost_per_1k_* "
                     "in config. Refusing to review on an unverifiable spend.")
-            spent += est or 0.0
-            if spent > budget:
-                return "error", (
-                    f"judge budget exceeded: ${spent:.4f} of "
+            spend["usd"] += est or 0.0
+            if spend["usd"] > budget:
+                return "fatal", (
+                    f"judge budget exceeded: ${spend['usd']:.4f} of "
                     f"${budget:.2f} (guardrails.budget_usd_per_run)")
             text = str(result.output).strip()
             # Verdict parsing is centralized (see _parse_verdict): the bare
@@ -315,3 +367,4 @@ class AutoModeTool(Tool[AutoModeInput]):
             return _parse_verdict(text)
         assert last_error is not None
         return "error", f"judge unavailable: {type(last_error).__name__}: {last_error}"
+

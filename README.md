@@ -281,9 +281,18 @@ so the text protocol behaves identically across local and cloud providers.
 `auto_mode` runs the loop you describe: it dispatches the goal to a coding
 CLI (opencode by default), reviews the reply against the goal with the
 configured model, and if the reply is insufficient, sends a follow-up prompt
-quoting the critique — up to `max_iterations`. The judge only accepts a bare
-`OK` as satisfied (hedged replies fail). Spend is metered against
-`guardrails.budget_usd_per_run` and attributed in the run's `spend` detail:
+quoting the critique — up to `max_iterations`. The judge accepts only an
+unqualified approval: hedged replies (`OK, but ...`) and objection prose
+(`OK. However, ...`) fail, always. Verbose judges that justify a clean
+first-line `OK` get their approval honored; prose that signals a defect
+(missing/unverified/wrong...) keeps the verdict strict, and that bias is
+deliberate — a caveat word inside praise costs one extra probe, never a
+wrong approval. With `[auto_mode] judge_replicas = N` (default 1) the
+verdict is the majority of N independent judge calls — a measured defense
+against single-call verdict variance; the judge's spend is capped by
+`guardrails.budget_usd_per_run` shared across the replicas, never N times
+it. All spend is metered the same way and attributed in the run's `spend`
+detail:
 the judge's own LLM calls always; the delegate CLI when it can report it —
 `claude -p --output-format json` exposes `total_cost_usd`, and an unreadable
 report from a cost-capable CLI fails closed. `opencode`/`pi` report no

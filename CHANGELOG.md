@@ -35,6 +35,17 @@
   plus the orchestrator's bookkeeping names. History stays in the trail;
   confusion does not.
 
+### Added
+- **`[auto_mode] judge_replicas` (1–5, default 1)**: the auto_mode judge
+  runs N independent model calls against the same (goal, reply) and the
+  majority verdict wins. Dogfooding a real local judge measured
+  single-call verdict variance on identical input, so the panel trades
+  extra small-model spend for verdict stability. Fail closed at every
+  seam: a non-majority of oks stays `insufficient` with the joined
+  critiques, even panels degrade deterministically (ties reject), and
+  judge spend shares one accumulator capped by `budget_usd_per_run` —
+  a replica that blows the budget stops the panel immediately.
+
 ### Changed
 - **`auto_mode` judge verdict parsing**: verbose local judges that append
   approval prose to a bare `OK` ("OK. The reply correctly affirms the

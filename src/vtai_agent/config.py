@@ -139,6 +139,17 @@ class Media(BaseModel):
     output_dir_name: str = "transcoded"
 
 
+class AutoMode(BaseModel):
+    # Judge replicas (`[auto_mode] judge_replicas`): the auto_mode judge
+    # runs N independent model calls against the same (goal, reply) and
+    # the majority verdict wins. Dogfooding measured single-call verdict
+    # variance on identical input, so the panel trades N times the
+    # small-model spend for verdict stability. Fail closed everywhere: a
+    # non-majority of ok stays "insufficient", and judge spend is capped
+    # by the same budget_usd_per_run the loop uses (never N times it).
+    judge_replicas: int = Field(default=1, ge=1, le=5)
+
+
 class Paths(BaseModel):
     model_config = ConfigDict(validate_default=True)
 
@@ -169,6 +180,7 @@ class Settings(BaseSettings):
     capabilities: Capabilities = Field(default_factory=Capabilities)
     paths: Paths = Field(default_factory=Paths)
     media: Media = Field(default_factory=Media)
+    auto_mode: AutoMode = Field(default_factory=AutoMode)
 
     @classmethod
     def settings_customise_sources(

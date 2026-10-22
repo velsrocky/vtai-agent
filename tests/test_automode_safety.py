@@ -169,6 +169,24 @@ class _StaticJudge:
         return self._result
 
 
+class _SequenceJudge:
+    """A judge whose calls return scripted outputs in order (classic
+    panel-of-nondeterministic-verdicts probe). An exception entry is
+    raised instead of returned; an exhausted script yields INSUFFICIENT."""
+
+    def __init__(self, script: list, **kwargs):
+        self._script = list(script)
+        self.calls = 0
+
+    async def run(self, *args, **kwargs):
+        self.calls += 1
+        item = (self._script.pop(0) if self._script
+                else "INSUFFICIENT: script exhausted")
+        if isinstance(item, Exception):
+            raise item
+        return _JudgeResult(item)
+
+
 def test_judge_accepts_only_bare_ok(sandbox, monkeypatch):
     cases = [
         ("OK", "ok", ""),
@@ -212,8 +230,8 @@ def test_judge_accepts_only_bare_ok(sandbox, monkeypatch):
 
 
 # ---------- judge budget ----------
-def _paid_settings(sandbox, budget: float):
-    from vtai_agent.config import Guardrails as GC, ProviderOpenAI, Settings
+def _paid_settings(sandbox, budget: float, n: int = 1):
+    from vtai_agent.config import AutoMode, Guardrails as GC, ProviderOpenAI, Settings
 
     return Settings(
         active_provider="openai",
@@ -224,6 +242,24 @@ def _paid_settings(sandbox, budget: float):
             trusted_bin_dirs=sandbox.cfg.trusted_bin_dirs,
         ),
         paths=sandbox.paths,
+        auto_mode=AutoMode(judge_replicas=n),
+    )
+
+
+def _replica_settings(sandbox, n: int):
+    """Local-provider Settings with a judge panel of n replicas (its spend
+    est is None locally, so replica calls stay budget-free in these tests)."""
+    from vtai_agent.config import AutoMode, Guardrails as GC, Settings
+
+    return Settings(
+        active_provider="local",
+        guardrails=GC(
+            budget_usd_per_run=10.0,
+            deny_globs=sandbox.cfg.deny_globs,
+            trusted_bin_dirs=sandbox.cfg.trusted_bin_dirs,
+        ),
+        paths=sandbox.paths,
+        auto_mode=AutoMode(judge_replicas=n),
     )
 
 
@@ -265,6 +301,87 @@ def test_judge_unknown_paid_spend_fails_closed(sandbox, monkeypatch):
     verdict, critique = asyncio.run(tool._judge("goal", "reply"))
     assert verdict == "error"
     assert "cannot verify judge spend" in critique
+
+
+# ---------- judge replica panel ----------
+def test_judge_panel_majority_ok(sandbox, monkeypatch):
+    """2 of 3 replicas approving (one with verbose prose) is a majority."""
+    seq = _SequenceJudge(["OK", "OK",
+                          "OK. The reply correctly affirms the program output."])
+    monkeypatch.setattr("pydantic_ai.Agent", lambda *a, **k: seq)
+    tool = AutoModeTool(_g(sandbox), settings=_replica_settings(sandbox, 3),
+                        model=object())
+    verdict, critique = asyncio.run(tool._judge("goal", "reply"))
+    assert verdict == "ok"
+    assert critique == ""
+    assert seq.calls == 3
+
+
+def test_judge_panel_minority_ok_stays_insufficient(sandbox, monkeypatch):
+    """1 ok + 2 objections: no ok majority — fail closed with the joined
+    critiques so the follow-up prompt carries every objection."""
+    seq = _SequenceJudge(["OK",
+                          "INSUFFICIENT: missing the absolute path",
+                          "INSUFFICIENT: output not verified"])
+    monkeypatch.setattr("pydantic_ai.Agent", lambda *a, **k: seq)
+    tool = AutoModeTool(_g(sandbox), settings=_replica_settings(sandbox, 3),
+                        model=object())
+    verdict, critique = asyncio.run(tool._judge("goal", "reply"))
+    assert verdict == "insufficient"
+    assert critique == "missing the absolute path | output not verified"
+    assert seq.calls == 3
+
+
+def test_judge_panel_error_majority_fails_closed(sandbox, monkeypatch):
+    """All replicas flaking (each retries twice) aggregates to 'error' —
+    the loop then stops instead of looping blindly."""
+    boom = RuntimeError("connection refused")
+    seq = _SequenceJudge([boom, boom] * 3)
+    monkeypatch.setattr("pydantic_ai.Agent", lambda *a, **k: seq)
+    tool = AutoModeTool(_g(sandbox), settings=_replica_settings(sandbox, 3),
+                        model=object())
+    verdict, critique = asyncio.run(tool._judge("goal", "reply"))
+    assert verdict == "error"
+    assert "judge unavailable" in critique
+    assert seq.calls == 6  # _JUDGE_ATTEMPTS retries per replica
+
+
+def test_judge_panel_even_tie_stays_insufficient(sandbox, monkeypatch):
+    """n=2 and a 1-1 split: no strict majority either way — insufficient."""
+    seq = _SequenceJudge(["OK", "INSUFFICIENT: unverified claim"])
+    monkeypatch.setattr("pydantic_ai.Agent", lambda *a, **k: seq)
+    tool = AutoModeTool(_g(sandbox), settings=_replica_settings(sandbox, 2),
+                        model=object())
+    verdict, critique = asyncio.run(tool._judge("goal", "reply"))
+    assert verdict == "insufficient"
+    assert "unverified claim" in critique
+    assert seq.calls == 2
+
+
+def test_judge_panel_stops_spending_on_budget(sandbox, monkeypatch):
+    """Shared budget across replicas: the $5-per-call cost blew the $8
+    budget on the second replica, so the panel must stop — the third
+    replica (and its spend) never happens."""
+    from types import SimpleNamespace
+
+    paid = _paid_settings(sandbox, 8.0, n=3)
+    usage = SimpleNamespace(input_tokens=5000, output_tokens=0, cost=None)
+    seq = _SequenceJudge(["OK", "OK", "OK"])
+    orig_run = seq.run
+
+    async def run_with_usage(*args, **kwargs):
+        result = await orig_run(*args, **kwargs)
+        result.usage = usage  # mimic runnable meters on paid providers
+        return result
+
+    seq.run = run_with_usage
+    monkeypatch.setattr("pydantic_ai.Agent", lambda *a, **k: seq)
+    tool = AutoModeTool(_g(sandbox), settings=paid, model=object())
+    verdict, critique = asyncio.run(tool._judge("goal", "reply"))
+    assert verdict == "error"
+    assert "judge budget exceeded" in critique
+    assert "$10.0000" in critique  # replica 1 ($5.00) + replica 2 ($5.00 — the budget-killer)
+    assert seq.calls == 2  # replica 3 never incurred spend
 
 
 # ---------- deputy CLI spend metering ----------
