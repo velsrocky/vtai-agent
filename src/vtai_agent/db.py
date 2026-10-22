@@ -253,7 +253,8 @@ def summarize_runs(limit: int = 500) -> dict:
                 continue  # mid-call placeholder row, not a judge outcome
             agg = judge_by_provider.setdefault(provider_of.get(st.run_id, "unknown"), {
                 "steps": 0, "parsed": 0, "unparsed": 0,
-                "verdicts": Counter(), "_iters": [],
+                "verdicts": Counter(), "_iters": [], "_reps": [],
+                "_panels": 0,
             })
             agg["steps"] += 1
             try:
@@ -270,17 +271,39 @@ def summarize_runs(limit: int = 500) -> dict:
                 iters = detail.get("iterations")
                 agg["_iters"].append(int(iters) if isinstance(iters, int)
                                      else len(verdicts))
+                for h in (hist if isinstance(hist, list) else []):
+                    if not isinstance(h, dict):
+                        continue
+                    reps = 1
+                    jp = h.get("judge_panel")
+                    if isinstance(jp, dict):
+                        # Panel observability: `judge_panel.replicas` on a
+                        # history row records how many independent model
+                        # calls made that decision.
+                        agg["_panels"] += 1
+                        rv = jp.get("replicas")
+                        if isinstance(rv, int) and 1 <= rv <= 100:
+                            reps = rv
+                    agg["_reps"].append(reps)
                 agg["parsed"] += 1
             except (TypeError, ValueError):
                 agg["unparsed"] += 1
         judge: dict[str, dict] = {}
         for prov, agg in judge_by_provider.items():
             iters = agg.pop("_iters")
+            reps = agg.pop("_reps")
+            panels_seen = agg.pop("_panels")
             judge[prov] = {
                 "steps": agg["steps"],
                 "parsed": agg["parsed"],
                 "unparsed": agg["unparsed"],
                 "verdicts": dict(agg["verdicts"]),
+                "model_calls": sum(reps),
+                "panel_seen": panels_seen > 0,
+                "replicas": {
+                    "mean": round(sum(reps) / len(reps), 2) if reps else None,
+                    "max": max(reps) if reps else None,
+                },
                 "iterations": {
                     "runs": len(iters),
                     "mean": round(sum(iters) / len(iters), 2) if iters else None,
@@ -384,7 +407,17 @@ def format_runs_summary(summ: dict,
             + " (steps from a retired or foreign surface; history is "
               "kept, live tools are what the registry holds)")
     for prov, jd in list(summ["judge"].items())[:3]:
-        parts = [f"  judge[{prov}]: {jd['steps']} calls"]
+        steps = jd["steps"]
+        mc = jd.get("model_calls")
+        rp = jd.get("replicas") or {}
+        # The replica breakdown only renders for rows that actually carry
+        # judge_panel metadata; legacy histories keep the original head.
+        if jd.get("panel_seen") and mc and mc != steps:
+            head = (f"  judge[{prov}]: {steps} steps / {mc} model calls"
+                    f" (replicas mean {rp.get('mean')} max {rp.get('max')})")
+        else:
+            head = f"  judge[{prov}]: {steps} calls"  # legacy-compatible head
+        parts = [head]
         if jd["unparsed"]:
             parts.append(f"unparsed {jd['unparsed']} (truncated/unreadable rows)")
         if jd["verdicts"]:

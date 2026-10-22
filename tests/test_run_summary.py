@@ -7,11 +7,18 @@ from vtai_agent import db
 from vtai_agent.errors import CODES
 
 
-def _judge_dump(*verdicts, iterations=None):
+def _judge_dump(*verdicts, iterations=None, panels=None):
     """The exact payload shape the orchestrator logs: ToolResult.dump_json
-    truncated at 4000 chars."""
+    truncated at 4000 chars. `panels` (per-history-row replica counts)
+    injects the judge_panel blocks the loop records on panel runs."""
     from vtai_agent.tools.registry import ToolResult
-    hist = [{"iteration": i, "verdict": v} for i, v in enumerate(verdicts, 1)]
+    hist = []
+    for i, v in enumerate(verdicts, 1):
+        row = {"iteration": i, "verdict": v}
+        if panels:
+            row["judge_panel"] = {"replicas": panels[i - 1],
+                                  "verdicts": [v], "judge_usd": 0.0}
+        hist.append(row)
     detail = {"plan": {"max_iterations": 3},
               "history": hist,
               "iterations": (iterations if iterations is not None
@@ -167,6 +174,40 @@ def test_judge_renders_one_line_per_provider(sandbox):
     out = db.format_runs_summary(db.summarize_runs(limit=50))
     assert "judge[opencode]: 1 calls | verdicts ok 2 | iters mean 2.0 max 2" in out
     assert "judge[claude]: 1 calls | verdicts error 1 insufficient 1" in out
+
+
+def test_judge_panel_replicas_aggregate(sandbox):
+    """Panel rows (judge_replicas > 1) surface as model calls: a 3-replica
+    panel makes three judge calls to produce one verdict, so the summary
+    separates step rows from replica-backed calls. Legacy rows and bad
+    panel blocks honestly count as the one call they made."""
+    from vtai_agent.tools.registry import ToolResult
+    r = db.start_run("panel goal", dry_run=False, provider="local")
+    db.log_step(r, 0, "auto_mode", "{}",
+                _judge_dump("ok", "insufficient"), "ok")  # legacy: 1 call
+    panel_hist = [{"iteration": 1, "verdict": "ok",
+                   "judge_panel": {"replicas": 3,
+                                   "verdicts": ["ok", "ok", "insufficient"],
+                                   "judge_usd": 0.0}}]
+    payload = ToolResult(
+        ok=True, summary="panel loop",
+        detail={"plan": {"max_iterations": 3}, "iterations": 1,
+                "history": panel_hist, "final_answer": "x"}).model_dump_json()
+    db.log_step(r, 1, "auto_mode", "{}", payload, "ok")
+    db.log_step(r, 2, "auto_mode", "{}", _judge_dump("ok", panels=[0]), "ok")
+    db.finish_run(r, "ok")
+
+    s = db.summarize_runs(limit=50)
+    jd = s["judge"]["local"]
+    assert jd["steps"] == 3
+    # 2 legacy verdict rows + a 3-replica panel + an invalid-panel row (1)
+    assert jd["model_calls"] == 6
+    assert jd["replicas"] == {"mean": 1.5, "max": 3}
+    assert jd["verdicts"] == {"ok": 3, "insufficient": 1}
+
+    out = db.format_runs_summary(s)
+    assert ("judge[local]: 3 steps / 6 model calls"
+            " (replicas mean 1.5 max 3)") in out
 
 
 def test_summary_flags_step_rows_from_retired_tools(sandbox):

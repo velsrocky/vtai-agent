@@ -362,6 +362,34 @@ def cmd_doctor(_args) -> int:
     return run_doctor()
 
 
+def _print_judge_panels(output_json: str) -> int:
+    """Per-iteration judge panel disclosure: `judge(N): v / v / v -> ok`.
+    Panel rows only — legacy auto_mode histories render nothing here, so
+    old run rows keep their exact displayed shape. Returns the number of
+    panel rows rendered (0 for legacy rows)."""
+    rendered = 0
+    try:
+        det = (json.loads(output_json) or {}).get("detail") or {}
+        hist = det.get("history")
+        if not isinstance(hist, list):
+            return 0
+        for h in hist:
+            if not isinstance(h, dict):
+                continue
+            jp = h.get("judge_panel")
+            if not (isinstance(jp, dict) and jp.get("verdicts")):
+                continue
+            vs = " / ".join(str(v) for v in jp["verdicts"])
+            print(f"       judge({jp.get('replicas')}): {vs}"
+                  f" -> {h.get('verdict')}")
+            if isinstance(jp.get("aborted"), str):
+                print(f"         aborted: {jp['aborted'][:120]}")
+            rendered += 1
+        return rendered
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return rendered
+
+
 def cmd_show(args) -> int:
     """One run, in full: what it was asked to do, every tool call it made,
     what the guardrails allowed or refused, and what it cost."""
@@ -390,6 +418,9 @@ def cmd_show(args) -> int:
             out = _summarize(st.output_json)
             if out:
                 print(f"       → {out}")
+            if st.tool == "auto_mode" and st.output_json:
+                if _print_judge_panels(st.output_json):
+                    print()
     else:
         print("\nsteps: none recorded")
 

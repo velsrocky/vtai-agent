@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Added
+- **Judge panel observability**: with `judge_replicas > 1`, each auto_mode
+  history row now records `judge_panel` — the per-replica verdicts, the
+  panel's real money spend, and (on a mid-panel budget halt) the fatal
+  `aborted` reason — so a panel decision is auditable like tool calls are.
+  `vtai show` renders `judge(N): v / v / v -> ok` rows; `spend` gains
+  `judge_usd`; `vtai runs --summary` gains model-call math
+  (`judge[local]: 10 steps / 14 model calls (replicas mean 1.4 max 3)`),
+  with legacy history rows still counted as the one call they made
+  (and rendered exactly as before).
 - **First-run experience**: `vtai init --doctor` runs the full preflight
   immediately after writing a starter config; init's footer now walks the
   README's quick start in commands (doctor first — it is the check that
@@ -13,7 +22,7 @@
   fresh-machine state, where a bare `run_shell` would allow nothing and
   the old output implied a real settings file existed).
 
-### Added
+### Added (distrib/CI)
 - **CI Python matrix** (3.12 / 3.13 / 3.14, all three OSes): the release
   floor is now enforced live on every push. Lesson source: 0.6.7's
   `requires-python >=3.14` metadata bug was invisible to a single-Python

@@ -158,6 +158,7 @@ class AutoModeTool(Tool[AutoModeInput]):
         last_reply = ""
         budget = self.settings.guardrails.budget_usd_per_run
         cli_spent = 0.0
+        judge_spent = 0.0
         for i in range(1, inp.max_iterations + 1):
             db.audit(run_id, "auto_mode", f"iteration {i}: dispatching to {inp.cli}",
                      allowed=True)
@@ -166,7 +167,10 @@ class AutoModeTool(Tool[AutoModeInput]):
                     binary, inp.cli, prompt, work, inp.timeout)
             except asyncio.TimeoutError:
                 return ToolResult(ok=False, summary=f"{inp.cli} timed out on iteration {i}",
-                                  detail={**plan, "history": history, "iteration": i})
+                                  detail={**plan, "history": history, "iteration": i,
+                                          "spend": {"cli_usd": cli_spent,
+                                                    "judge_usd": round(judge_spent, 6),
+                                                    "budget": budget}})
             # Spend attribution: a CLI that can report its own spend but
             # yields no readable report must not be treated as free.
             if inp.cli in _CLI_COST_CAPABLE and cli_cost is None:
@@ -178,7 +182,9 @@ class AutoModeTool(Tool[AutoModeInput]):
                         "CLI that reports its spend: opencode/pi, or set a local "
                         "provider). Refusing an unverifiable paid spend."),
                     detail={**plan, "history": history, "iteration": i,
-                            "spend": {"cli_usd": None, "budget": budget}},
+                            "spend": {"cli_usd": None,
+                                      "judge_usd": round(judge_spent, 6),
+                                      "budget": budget}},
                 )
             cli_spent += cli_cost or 0.0
             if cli_spent > budget:
@@ -187,10 +193,15 @@ class AutoModeTool(Tool[AutoModeInput]):
                     summary=(f"auto_mode budget (${budget:.2f}) exceeded: {inp.cli} "
                              f"has already spent ${cli_spent:.4f} by iteration {i}."),
                     detail={**plan, "history": history, "iteration": i,
-                            "spend": {"cli_usd": cli_spent, "budget": budget}},
+                            "spend": {"cli_usd": cli_spent,
+                                      "judge_usd": round(judge_spent, 6),
+                                      "budget": budget}},
                 )
+            panel: dict = {}
             verdict, critique = await self._judge(
-                inp.goal, last_reply, budget_remaining=budget - cli_spent)
+                inp.goal, last_reply, budget_remaining=budget - cli_spent,
+                panel_out=panel)
+            judge_spent += panel.get("judge_usd", 0.0)
             # The judge itself is down: no reply can be verified, so stop
             # instead of looping blindly or declaring success.
             if verdict == "error":
@@ -199,11 +210,14 @@ class AutoModeTool(Tool[AutoModeInput]):
                     summary=f"cannot verify goal: {critique}",
                     detail={**plan, "iterations": i, "history": history,
                             "final_answer": last_reply[-4000:],
-                            "spend": {"cli_usd": cli_spent, "budget": budget}},
+                            "spend": {"cli_usd": cli_spent,
+                                      "judge_usd": round(judge_spent, 6),
+                                      "budget": budget}},
                 )
             history.append({"iteration": i, "prompt": prompt[:2000],
                             "reply": last_reply[-2000:], "verdict": verdict,
                             "critique": critique[:1000],
+                            "judge_panel": panel or None,
                             "cli_cost_usd": cli_cost})
             if verdict == "ok":
                 return ToolResult(
@@ -212,7 +226,9 @@ class AutoModeTool(Tool[AutoModeInput]):
                     detail={**plan, "iterations": i, "final_answer": last_reply[-4000:],
                             "history": history,
                             "spend": {"cli_usd": cli_spent if cli_cost is not None
-                                      else "unmeasured", "budget": budget}},
+                                      else "unmeasured",
+                                      "judge_usd": round(judge_spent, 6),
+                                      "budget": budget}},
                 )
             prompt = (
                 "The previous answer did not satisfy the goal.\n\n"
@@ -226,7 +242,9 @@ class AutoModeTool(Tool[AutoModeInput]):
             summary=f"Not satisfied after {inp.max_iterations} iteration(s) via {inp.cli}",
             detail={**plan, "iterations": inp.max_iterations,
                     "final_answer": last_reply[-4000:], "history": history,
-                    "spend": {"cli_usd": cli_spent, "budget": budget}},
+                    "spend": {"cli_usd": cli_spent,
+                              "judge_usd": round(judge_spent, 6),
+                              "budget": budget}},
         )
 
     @staticmethod
@@ -291,7 +309,8 @@ class AutoModeTool(Tool[AutoModeInput]):
         return text, None
 
     async def _judge(self, goal: str, reply: str,
-                     budget_remaining: float | None = None) -> tuple[str, str]:
+                     budget_remaining: float | None = None,
+                     panel_out: dict | None = None) -> tuple[str, str]:
         from pydantic_ai import Agent
 
         from ..providers import build_model
@@ -317,8 +336,25 @@ class AutoModeTool(Tool[AutoModeInput]):
                 agent, goal, reply, budget, spend)
             if verdict == "fatal":
                 # Money or misconfiguration: stop now, never spend further.
+                if panel_out is not None:
+                    # Record what the panel achieved before the hard stop —
+                    # replica spends are real even when the verdict died.
+                    panel_out.clear()
+                    panel_out.update({
+                        "replicas": n, "verdicts": [v for v, _ in verdicts],
+                        "judge_usd": round(spend["usd"], 6),
+                        "aborted": critique[:200],
+                    })
                 return "error", critique
             verdicts.append((verdict, critique))
+        if panel_out is not None:
+            # Panel observability: the loop stores this on the history row
+            # so a panel decision is auditable like tool calls are.
+            panel_out.clear()
+            panel_out.update({
+                "replicas": n, "verdicts": [v for v, _ in verdicts],
+                "judge_usd": round(spend["usd"], 6),
+            })
         if n == 1:
             return verdicts[0]
         return _aggregate_verdicts(verdicts, n)

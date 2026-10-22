@@ -384,6 +384,61 @@ def test_judge_panel_stops_spending_on_budget(sandbox, monkeypatch):
     assert seq.calls == 2  # replica 3 never incurred spend
 
 
+# ---------- panel observability ----------
+def test_judge_panel_out_records_verdicts(sandbox, monkeypatch):
+    """The loop's panel_out receives the per-replica verdict list so the
+    history row can disclose what the panel actually decided."""
+    seq = _SequenceJudge(["OK", "OK", "OK"])
+    monkeypatch.setattr("pydantic_ai.Agent", lambda *a, **k: seq)
+    tool = AutoModeTool(_g(sandbox), settings=_replica_settings(sandbox, 3),
+                        model=object())
+    panel: dict = {}
+    verdict, _ = asyncio.run(tool._judge("goal", "reply", panel_out=panel))
+    assert verdict == "ok"
+    assert panel == {"replicas": 3, "verdicts": ["ok", "ok", "ok"],
+                     "judge_usd": 0.0}
+
+
+def test_judge_panel_out_for_a_single_replica(sandbox, monkeypatch):
+    seq = _SequenceJudge(["OK"])
+    monkeypatch.setattr("pydantic_ai.Agent", lambda *a, **k: seq)
+    tool = AutoModeTool(_g(sandbox), settings=_replica_settings(sandbox, 1),
+                        model=object())
+    panel: dict = {}
+    verdict, _ = asyncio.run(tool._judge("goal", "reply", panel_out=panel))
+    assert verdict == "ok"
+    assert panel == {"replicas": 1, "verdicts": ["ok"], "judge_usd": 0.0}
+
+
+def test_judge_panel_out_records_fatal_stop(sandbox, monkeypatch):
+    """A mid-panel budget halt still records what was collected: verdicts
+    so far, the real money spent, and the fatal reason — money forensics."""
+    from types import SimpleNamespace
+
+    paid = _paid_settings(sandbox, 8.0, n=3)
+    usage = SimpleNamespace(input_tokens=5000, output_tokens=0, cost=None)
+    seq = _SequenceJudge(["OK", "OK", "OK"])
+    orig_run = seq.run
+
+    async def run_with_usage(*args, **kwargs):
+        result = await orig_run(*args, **kwargs)
+        result.usage = usage  # mimic runnable meters on paid providers
+        return result
+
+    seq.run = run_with_usage
+    monkeypatch.setattr("pydantic_ai.Agent", lambda *a, **k: seq)
+    tool = AutoModeTool(_g(sandbox), settings=paid, model=object())
+    panel: dict = {}
+    verdict, critique = asyncio.run(
+        tool._judge("goal", "reply", panel_out=panel))
+    assert verdict == "error"
+    assert "judge budget exceeded" in critique
+    assert panel["replicas"] == 3
+    assert panel["verdicts"] == ["ok"]  # replica 1 only; 2 died mid-call
+    assert panel["judge_usd"] == 10.0
+    assert "judge budget exceeded" in panel["aborted"]
+
+
 # ---------- deputy CLI spend metering ----------
 def test_resolve_cli_argv_wraps_windows_cmd_shim(monkeypatch):
     import os
