@@ -179,6 +179,27 @@ def test_judge_accepts_only_bare_ok(sandbox, monkeypatch):
         ("Okay, task done", "insufficient", "Okay, task done"),
         ("INSUFFICIENT: missing verification", "insufficient",
          "missing verification"),
+        # Verbose approval (live-caught in the judge dogfood): first sentence
+        # is exactly OK, remainder praises — accepted.
+        ("OK. The reply correctly identifies the creation of hello.sh and "
+         "provides the exact program output (DOGFOOD-OK).", "ok", ""),
+        ("ok\nthe program printed DOGFOOD-OK as required.", "ok", ""),
+        ("OK: the goal is fully satisfied.", "ok", ""),
+        # Verbose rejection: the prose announces a defect — must stay
+        # insufficient with the whole reply as critique (no colon).
+        ("OK. However, the output line is not shown.", "insufficient",
+         "OK. However, the output line is not shown."),
+        ("OK. The reply is missing the absolute file path.", "insufficient",
+         "OK. The reply is missing the absolute file path."),
+        # Hedge class stays rejected: attached word after OK.
+        ("OKay, everything checks out", "insufficient",
+         "OKay, everything checks out"),
+        # Known false-reject (documented, fail-closed): praise containing a
+        # caveat word costs one extra loop probe instead of a wrong approval.
+        ("OK. Nothing is missing from the reply.", "insufficient",
+         "OK. Nothing is missing from the reply."),
+        # Empty reply falls back to the fixed message.
+        ("", "insufficient", "reply did not satisfy the goal"),
     ]
     for text, expected_verdict, expected_critique in cases:
         monkeypatch.setattr(

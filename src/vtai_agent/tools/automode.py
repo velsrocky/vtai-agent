@@ -9,6 +9,7 @@ quoting the gap and the previous attempt → repeat, bounded.
 import asyncio
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -43,6 +44,49 @@ _JUDGE_TIMEOUT = 120.0
 #   opencode/pi: no cost field in headless output — their spend is bounded
 #     by max_iterations/timeout and labeled "unmeasured" in run details.
 _CLI_COST_CAPABLE = frozenset({"claude"})
+
+# Verdict parsing for judge output. The system prompt demands an exact bare
+# "OK" or "INSUFFICIENT: <critique>", but real judges — especially verbose
+# local ones — often append a justification to an approval ("OK. The reply
+# correctly identifies ...", observed live in the judge-path dogfood). The
+# parser therefore accepts two shapes:
+#   1. a bare OK (trailing period allowed) — the contract-perfect case, and
+#   2. an approval whose FIRST sentence is exactly "OK" and whose remainder
+#      does not carry a defect-signalling word (hedges and objections).
+# Everything else is insufficient with the old critique extraction. The
+# marker list biases toward rejection on purpose: a praise sentence that
+# happens to contain a caveat word (e.g. "nothing is missing") fails the
+# verdict and costs the loop one extra probe — a wrong approval would
+# matter far more. "OK, but ..." and "Okay, ...", earlier live-caught
+# hedge shapes, stay rejected: a comma or an attached word means the
+# sentence head is not a clean OK.
+_ANSWER_SPLIT = re.compile(r"[.!?:\n]")
+_DEFECT_MARKERS = re.compile(
+    r"\b(BUT|HOWEVER|ALTHOUGH|THOUGH|UNLESS|EXCEPT|STILL|YET|MISSING|"
+    r"LACKS|LACKING|UNVERIFIED|INCORRECT|INCOMPLETE|WRONG|ISSUE|ISSUES|"
+    r"ERRORS?|FAILS?|FAILED|FAILING|CONCERNS?|CANNOT|CAN'T|"
+    r"DOESN'T|DOES NOT|DID NOT|NOT)\b")
+
+
+def _parse_verdict(text: str) -> tuple[str, str]:
+    """Turn raw judge output into (verdict, critique).
+
+    Returns ("ok", "") when the reply is judged satisfying as described
+    above, ("insufficient", critique) otherwise. The critique is the text
+    after the first colon when one exists (the INSUFFICIENT: prefix), the
+    whole reply when there is none, and a fixed fallback when empty.
+    """
+    s = text.strip()
+    up = s.upper()
+    if up.rstrip(".") == "OK":
+        return "ok", ""
+    parts = _ANSWER_SPLIT.split(up, maxsplit=1)
+    rest = parts[1] if len(parts) > 1 else ""
+    if parts[0].strip() == "OK" and not _DEFECT_MARKERS.search(rest):
+        # Approval prose: the judge conceded the goal and then elaborated.
+        return "ok", ""
+    critique = s.split(":", 1)[1].strip() if ":" in s else s
+    return "insufficient", critique or "reply did not satisfy the goal"
 
 
 class AutoModeInput(BaseModel):
@@ -266,13 +310,8 @@ class AutoModeTool(Tool[AutoModeInput]):
                     f"judge budget exceeded: ${spent:.4f} of "
                     f"${budget:.2f} (guardrails.budget_usd_per_run)")
             text = str(result.output).strip()
-            # Strict verdict token: only a bare "OK" (trailing period allowed)
-            # means satisfied. "OKay, mostly..." or "OK, but ..." must count
-            # as insufficient — a prefix match would let hedge replies pass
-            # an unattended review.
-            if text.upper().rstrip(".") == "OK":
-                return "ok", ""
-            critique = text.split(":", 1)[1].strip() if ":" in text else text
-            return "insufficient", critique or "reply did not satisfy the goal"
+            # Verdict parsing is centralized (see _parse_verdict): the bare
+            # OK contract, verbose local-judge approvals, hedge rejection.
+            return _parse_verdict(text)
         assert last_error is not None
         return "error", f"judge unavailable: {type(last_error).__name__}: {last_error}"

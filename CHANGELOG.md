@@ -35,6 +35,20 @@
   plus the orchestrator's bookkeeping names. History stays in the trail;
   confusion does not.
 
+### Changed
+- **`auto_mode` judge verdict parsing**: verbose local judges that append
+  approval prose to a bare `OK` ("OK. The reply correctly affirms the
+  creation ...", caught live in the judge-path dogfood) were misread as
+  rejections. The parser now accepts an approval whose first sentence is
+  exactly `OK` when the remainder carries no defect-signalling word, and
+  stays strict on everything else: `OK, but ...`, `Okay, ...` and
+  objection prose (`OK. However, ...`) still reject, and the marker scan
+  deliberately biases toward rejection — a caveat word inside praise
+  costs one extra loop probe, never a wrong approval. Dogfooding with a
+  real local judge also measured verdict variance on an ambiguous
+  scripted reply (3 trials: prose-OK rejected, bare-OK accepted,
+  path-placement nit picked) — labeled answers removed the ambiguity.
+
 ## [0.6.8] - 2026-10-21
 
 ### Fixed
