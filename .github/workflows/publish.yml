@@ -116,15 +116,19 @@ jobs:
           # version, that refusal IS the auth verdict: a request this far
           # into the registry API passed OIDC authorization. The match is
           # narrow — the registry's own message — never a blanket || true.
-          set -o pipefail
+          # set +e brackets the capture: with bash -e, a failing command
+          # substitution aborts before our case can classify the failure
+          # (observed in rehearsal 39783619104: silent exit 1, no output).
+          set +e
           OUT=$(./mcp-publisher publish server.json 2>&1)
           RC=$?
+          set -e
           echo "$OUT"
           if [ "$RC" -eq 0 ]; then exit 0; fi
           case "$OUT" in
             *"cannot publish duplicate version"*)
-              echo "AUTH+SCHEMA PROVEN: version already listed; registry refused "
-                   "the duplicate — immutable history enforced server-side."
+              echo "AUTH+SCHEMA PROVEN: version already listed; the registry's
+                    immutable-history refusal passed the OIDC path through."
               exit 0 ;;
             *) exit 1 ;;
           esac
