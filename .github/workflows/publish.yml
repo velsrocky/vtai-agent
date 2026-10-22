@@ -83,7 +83,11 @@ jobs:
     # On a tag: list only after PyPI actually published (the registry
     # should only offer artifacts a resolver can fetch). On dispatch:
     # fire alone — the OIDC rehearsal; PyPI's job is skipped.
-    if: needs.publish.result == 'success' || github.event_name == 'workflow_dispatch'
+    # !cancelled() is load-bearing: an upstream SKIP cascades to dependents
+    # before their `if` is evaluated unless always()/!cancelled() forces
+    # evaluation (first rehearsal fired and silently skipped on exactly
+    # this rule).
+    if: ${{ !cancelled() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch') }}
     permissions:
       id-token: write
       contents: read
